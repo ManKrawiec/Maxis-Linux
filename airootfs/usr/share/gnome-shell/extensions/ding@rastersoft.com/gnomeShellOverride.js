@@ -1,7 +1,9 @@
+/* eslint-disable no-invalid-this */
+/* eslint-disable no-undef */
+/* The above is for use of global in this file as Shell.global */
 /* Gnome Shell Override
  *
- * Copyright (C) 2021 Sundeep Mediratta (smedius@gmail.com)
- * Copyright (C) 2020 Sergio Costas (rastersoft@gmail.com)
+ * Copyright (C) 2023 Sundeep Mediratta (smedius@gmail.com)
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -15,136 +17,174 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
+
 /* exported GnomeShellOverride */
-'use strict';
-import Shell from 'gi://Shell'
-import Meta from 'gi://Meta'
 
-import * as WorkspaceAnimation from 'resource:///org/gnome/shell/ui/workspaceAnimation.js'
+const {Meta, Clutter, GObject} = imports.gi;
 
-var replaceData = {};
+// Show desktop windows on workspace thumbnails
+const SHOW_ON_WORKSPACE_THUMBNAILS = true;
+const SHOW_ICONS_ON_OVERVIEW = false;
+const ANIMATION_MULTIPLE = 1;
 
-/*
-     * This class overrides methods in the Gnome Shell. The new methods
-     * need to be defined below the class as seperate functions.
-     * The old methods that are overriden can be accesed by relpacedata.old_'name-of-replaced-method'
-     * in the new functions
-    */
+import {WorkspaceBackground} from 'resource:///org/gnome/shell/ui/workspace.js';
 
+import {InjectionManager} from
+    'resource:///org/gnome/shell/extensions/extension.js';
 
-export class GnomeShellOverride {
+import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+import * as Util from 'resource:///org/gnome/shell/misc/util.js';
+
+export {GnomeShellOverride};
+
+var GnomeShellOverride = class {
     constructor() {
-        this._isX11 = !Meta.is_wayland_compositor();
+        this._injectionManager = new InjectionManager();
     }
 
     enable() {
-        if (this._isX11) {  // ** X11 Methods only
-            if (WorkspaceAnimation &&
-                WorkspaceAnimation.WorkspaceGroup !== undefined) {
-                this.replaceMethod(WorkspaceAnimation.WorkspaceGroup, '_shouldShowWindow', newShouldShowWindow);
-            }
-        } else {    // ** Wayland replace methods below this
-            this.replaceMethod(Shell.Global, 'get_window_actors', newGetWindowActors);
-        }
+        const Background = WorkspaceBackground;
+        this._injectionManager.overrideMethod(Background.prototype, '_init',
+            this._newBackgroundInit.bind(this));
     }
-
-    // restore external methods only if have been intercepted
 
     disable() {
-        for (let value of Object.values(replaceData)) {
-            if (value[0]) {
-                value[1].prototype[value[2]] = value[0];
-            }
-        }
-        replaceData = {};
+        this._injectionManager.clear();
     }
 
-    /**
-     * Replaces a method in a class with our own method, and stores the original
-     * one in 'replaceData' using 'old_XXXX' (being XXXX the name of the original method),
-     * or 'old_classId_XXXX' if 'classId' is defined. This is done this way for the
-     * case that two methods with the same name must be replaced in two different
-     * classes
-     *
-     * @param {class} className The class where to replace the method
-     * @param {string} methodName The method to replace
-     * @param {Function} functionToCall The function to call as the replaced method
-     * @param {string} [classId] an extra ID to identify the stored method when two
-     *                           methods with the same name are replaced in
-     *                           two different classes
-     */
+    _newBackgroundInit(origninalMethod) {
+        return function (...args) {
+            origninalMethod.call(this, ...args);
 
-    replaceMethod(className, methodName, functionToCall, classId) {
-        if (className.prototype[methodName] === functionToCall) {
-            return;
-        }
-        if (classId) {
-            replaceData[`old_${classId}_${methodName}`] = [className.prototype[methodName], className, methodName, classId];
-        } else {
-            replaceData[`old_${methodName}`] = [className.prototype[methodName], className, methodName];
-        }
-        className.prototype[methodName] = functionToCall;
+            /** @enum {number} */
+            const ControlsState = {
+                HIDDEN: 0,
+                WINDOW_PICKER: 1,
+                APP_GRID: 2,
+            };
+
+            const opaque = 255;
+            const transparent = 0;
+
+            const adjustment =
+                Main.overview._overview._controls._stateAdjustment
+
+            function _windowIsOnThisMonitor(metawindow, monitorIndex) {
+                const geometry =
+                    global.display.get_monitor_geometry(monitorIndex);
+
+                const [intersects] =
+                    metawindow.get_frame_rect().intersect(geometry);
+                
+                return intersects;
+            }
+
+            function _modifyTransparency(value) {
+                const {initialState, finalState, } =
+                    adjustment.getStateTransitionParams();
+
+                if ((initialState == ControlsState.HIDDEN ||
+                    finalState == ControlsState.HIDDEN) &&
+                    (Math.abs(initialState - finalState) == 1))
+                    return _setTransparency(value);
+
+                return transparent;
+            }
+
+            function _setTransparency(value) {
+                if (SHOW_ICONS_ON_OVERVIEW)
+                    return opaque;
+                return Util.lerp(opaque, transparent,
+                    Math.min(ANIMATION_MULTIPLE * value, 1.0));
+            }
+
+            const desktopWindows = global.get_window_actors().filter(a =>
+                a.meta_window.get_window_type() === Meta.WindowType.DESKTOP &&
+                _windowIsOnThisMonitor(a.meta_window, this._monitorIndex));
+
+            if (desktopWindows.length) {
+                const desktopLayer = new Clutter.Actor({
+                    layout_manager: new DesktopLayout(),
+                    clip_to_allocation: true,
+                });
+
+                for (let windowActor of desktopWindows) {
+                    const clone = new Clutter.Clone({
+                        source: windowActor,
+                    });
+
+                    desktopLayer.add_child(clone);
+
+                    windowActor.connectObject('destroy', () => {
+                        clone.destroy();
+                    }, this);
+                }
+
+                const offset = 0;
+
+                const syncAll = Clutter.BindConstraint.new(
+                    this._bgManager.backgroundActor,
+                    Clutter.BindCoordinate.ALL,
+                    offset);
+
+                desktopLayer.add_constraint(syncAll);
+                desktopLayer.opacity = _setTransparency(opaque);
+    
+                this._stateAdjustment.connectObject('notify::value',
+                    (stAdjustment) => {
+                        if (SHOW_ON_WORKSPACE_THUMBNAILS)
+                            desktopLayer.opacity =
+                                _setTransparency(this._stateAdjustment.value);
+                        else
+                            desktopLayer.opacity =
+                                _modifyTransparency(stAdjustment.value);
+                    },
+                    this
+                );
+
+                this._backgroundGroup.insert_child_above(
+                    desktopLayer,
+                    this._bgManager.backgroundActor
+                );
+            }
+        };
     }
 };
 
+class DesktopLayout extends Clutter.LayoutManager {
+    static {
+        GObject.registerClass(this);
+    }
 
-/**
- * New Functions used to replace the gnome shell functions are defined below.
- */
+    vfunc_get_preferred_width() {
+        return [0, 0];
+    }
 
-/**
- * Receives a list of metaWindow or metaWindowActor objects, and remove from it
- * our desktop window
- *
- * @param {GList} windowList A list of metaWindow or metaWindowActor objects
- * @returns {GList} The same list, but with the desktop window removed
- */
+    vfunc_get_preferred_height() {
+        return [0, 0];
+    }
 
-/**
- *
- * @param windowList
- */
-function removeDesktopWindowFromList(windowList) {
-    let returnVal = [];
-    for (let element of windowList) {
-        let window = element;
-        if (window.get_meta_window) { // it is a MetaWindowActor
-            window = window.get_meta_window();
-        }
-        if (!window.customJS_ding || !window.customJS_ding.hideFromWindowList) {
-            returnVal.push(element);
+    vfunc_allocate(container, box) {
+        const monitorIndex = Main.layoutManager.findIndexForActor(container);
+        const monitor = Main.layoutManager.monitors[monitorIndex];
+        const hscale = box.get_width() / monitor.width;
+        const vscale = box.get_height() / monitor.height;
+
+        for (const child of container) {
+            const childBox = new Clutter.ActorBox();
+            const frameRect = child.get_source()?.metaWindow.get_frame_rect();
+
+            childBox.set_size(
+                Math.round(Math.min(frameRect.width, monitor.width) * hscale),
+                Math.round(Math.min(frameRect.height, monitor.height) * vscale)
+            );
+
+            childBox.set_origin(
+                Math.round((frameRect.x - monitor.x) * hscale),
+                Math.round((frameRect.y - monitor.y) * vscale)
+            );
+
+            child.allocate(childBox);
         }
     }
-    return returnVal;
-}
-
-/**
- * Method replacement for Shell.Global.get_window_actors
- * It removes the desktop window from the list of windows in the Activities mode
- */
-
-/**
- *
- */
-function newGetWindowActors() {
-    /* eslint-disable no-invalid-this */
-    let windowList = replaceData.old_get_window_actors[0].apply(this, []);
-    return removeDesktopWindowFromList(windowList);
-}
-
-/**
- * Method replacement under X11 for should show window
- * It removes the desktop window from the window animation
- */
-
-/**
- *
- * @param window
- */
-function newShouldShowWindow(window) {
-    if (window.get_window_type() === Meta.WindowType.DESKTOP) {
-        return false;
-    }
-    /* eslint-disable no-invalid-this */
-    return replaceData.old__shouldShowWindow[0].apply(this, [window]);
 }

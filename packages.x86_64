@@ -127,26 +127,36 @@ xdg-utils
 xfsprogs
 xl2tpd
 zsh
+os-prober
 
 #
 # Custom Packages
 
-calamares-git
-ckbcomp
-boost-libs
-hwinfo
-kconfig
-kcoreaddons
-ki18n
-kiconthemes
-kpmcore
-libpwquality
-polkit-qt6
+
+#calamares-git
+#ckbcomp
+#boost-libs
+#hwinfo
+#kconfig
+#kcoreaddons
+#ki18n
+#kiconthemes
+#kpmcore
+#libpwquality
+#polkit-qt6
+#qt6-base
+#kcrash
+#kpackage
+#qt6-svg
+#python-jsonschema
+#python-yaml
+
+linexin-installer
+gparted
 python
-python-jsonschema
-python-yaml
-qt6-svg
 solid
+noto-fonts
+noto-fonts-cjk
 squashfs-tools
 yaml-cpp
 qemu-guest-agent
@@ -156,9 +166,6 @@ networkmanager
 network-manager-applet
 git
 cargo
-qt6-base
-kcrash
-kpackage
 util-linux
 flatpak
 vulkan-radeon
@@ -185,8 +192,13 @@ ffmpeg
 gstreamer
 python-distro
 pipewire-pulse
+pulseaudio-alsa
 vkd3d
 lib32-vkd3d
+lib32-nvidia-utils
+mesa
+lib32-mesa
+xf86-video-nouveau
 linexin-desktop-presets
 spice-vdagent
 
@@ -199,5 +211,4 @@ gst-plugins-base
 gst-plugins-good
 gst-plugin-pipewire
 
-#Appimagelauncher
-appimagelauncher
+#appimagelauncher

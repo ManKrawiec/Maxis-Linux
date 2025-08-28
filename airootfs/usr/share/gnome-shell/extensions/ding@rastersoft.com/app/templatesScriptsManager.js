@@ -1,5 +1,6 @@
 /* DING: Desktop Icons New Generation for GNOME Shell
  *
+ * Gtk4 Port Copyright (C) 2022, 2025 Sundeep Mediratta (smedius@gmail.com)
  * Copyright (C) 2020 Sergio Costas (rastersoft@gmail.com)
  *
  * This program is free software: you can redistribute it and/or modify
@@ -14,216 +15,294 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-'use strict';
-const Gio = imports.gi.Gio;
-const GLib = imports.gi.GLib;
-const Gtk = imports.gi.Gtk;
-const Enums = imports.enums;
-const DesktopIconsUtil = imports.desktopIconsUtil;
-const SignalManager = imports.signalManager;
+import {Gio, GLib} from '../dependencies/gi.js';
 
-var TemplatesScriptsManagerFlags = {
-    'NONE': 0,
-    'ONLY_EXECUTABLE': 1,
-    'HIDE_EXTENSIONS': 2,
-};
+export {TemplatesScriptsManager};
 
-var TemplatesScriptsManager = class extends SignalManager.SignalManager {
-    constructor(baseFolder, flags, activatedCB) {
-        super();
-        // Too many templates can result in resource exhaustion, crashing
-        // the desktop. To avoid this, we limit the number of templates to 100.
-        // It can happen if the Templates folder points to the wrong folder,
-        // or if there is a loop due to a symlink to an already added folder.
-        this._maxNumberOfTemplates = 100;
-        this._activatedCB = activatedCB;
+const MAX_DIRS = 100;
+const MAX_MENUENTRIES = 50;
+const MAX_MENU_DEPTH = 10;
+
+const TemplatesScriptsManager = class {
+    constructor(baseFolder, selectionfilter, Data) {
+        this._selectionFilter = selectionfilter;
+        this._actionName = Data.appName;
+        this.FileUtils = Data.FileUtils;
+        this.Enums = Data.Enums;
         this._entries = [];
         this._entriesEnumerateCancellable = null;
-        this._readingEntries = false;
         this._entriesDir = baseFolder;
-        this._entriesFolderChanged = false;
-        this._flags = flags;
-        this._entriesDirSignals = new SignalManager.SignalManager();
+        this._entriesDirMonitors = [];
+        this.gioMenu = null;
 
-        if (this._entriesDir == GLib.get_home_dir()) {
+        if (this._entriesDir === GLib.get_home_dir())
             this._entriesDir = null;
-        }
+
         if (this._entriesDir !== null) {
-            this._monitorDir = baseFolder.monitor_directory(Gio.FileMonitorFlags.WATCH_MOVES, null);
+            this._monitorDir =
+                baseFolder.monitor_directory(
+                    Gio.FileMonitorFlags.WATCH_MOVES,
+                    null
+                );
+
             this._monitorDir.set_rate_limit(1000);
-            this.connectSignal(this._monitorDir, 'changed', (obj, file, otherFile, eventType) => {
-                this._updateEntries().catch(e => {
-                    print(`Exception while updating entries in monitor: ${e.message}\n${e.stack}`);
-                });
-            });
-            this._updateEntries().catch(e => {
-                print(`Exception while updating entries: ${e.message}\n${e.stack}`);
-            });
-        }
-    }
 
-    destroy() {
-        this._entriesDirSignals.disconnectAllSignals();
-        this.disconnectAllSignals();
-    }
-
-    async _updateEntries() {
-        if (this._readingEntries) {
-            this._entriesFolderChanged = true;
-            if (this._entriesEnumerateCancellable) {
-                this._entriesEnumerateCancellable.cancel();
-                this._entriesEnumerateCancellable = null;
-            }
-            return;
-        }
-
-        this._readingEntries = true;
-        let entriesList = null;
-
-        this._processedEntries = 0;
-        do {
-            this._entriesDirSignals.disconnectAllSignals();
-            this._entriesFolderChanged = false;
-            if (!this._entriesDir.query_exists(null)) {
-                entriesList = null;
-                break;
-            }
-            entriesList = await this._processDirectory(this._entriesDir);
-        } while ((entriesList === null) || this._entriesFolderChanged);
-
-        this._entries = entriesList;
-        this._readingEntries = false;
-    }
-
-    async _processDirectory(directory) {
-        this._processedEntries++;
-        if (this._processedEntries >= this._maxNumberOfTemplates) {
-            return [];
-        }
-        if (directory !== this._entriesDir) {
-            let monitorDir = directory.monitor_directory(Gio.FileMonitorFlags.WATCH_MOVES, null);
-            monitorDir.set_rate_limit(1000);
-            this._entriesDirSignals.connectSignal(monitorDir, 'changed', (obj, file, otherFile, eventType) => {
-                this._updateEntries();
-            });
-        }
-
-        try {
-            var files = await this._readDirectory(directory);
-        } catch (e) {
-            return null;
-        }
-
-        if (files === null) {
-            return null;
-        }
-        let output = [];
-        for (let file of files) {
-            if (file[2] === null) {
-                output.push(file);
-                continue;
-            }
-            file[2] = await this._processDirectory(file[1]);
-            if (file[2] === null) {
-                return null;
-            }
-            if (file[2].length != 0) {
-                output.push(file);
-            }
-        }
-        return output;
-    }
-
-    _readDirectory(directory) {
-        return new Promise((resolve, reject) => {
-            if (this._entriesEnumerateCancellable) {
-                this._entriesEnumerateCancellable.cancel();
-            }
-            this._entriesEnumerateCancellable = new Gio.Cancellable();
-            directory.enumerate_children_async(
-                Enums.DEFAULT_ATTRIBUTES,
-                Gio.FileQueryInfoFlags.NONE,
-                GLib.PRIORITY_DEFAULT,
-                this._entriesEnumerateCancellable,
-                (source, result) => {
-                    this._entriesEnumerateCancellable = null;
-                    let fileList = [];
-                    try {
-                        let fileEnum = source.enumerate_children_finish(result);
-                        if (this._entriesFolderChanged) {
-                            resolve(null);
-                            return;
+            this._monitorDir.connect(
+                'changed',
+                () => {
+                    this.updateEntries()
+                    .catch(
+                        e => {
+                            console.log(
+                                'Exception while updating entries in ' +
+                                `monitor: ${e.message}\n${e.stack}`
+                            );
                         }
-                        let info;
-                        while ((info = fileEnum.next_file(null))) {
-                            let isDir = info.get_file_type() == Gio.FileType.DIRECTORY;
-                            if ((this._flags & TemplatesScriptsManagerFlags.ONLY_EXECUTABLE) &&
-                                !isDir &&
-                                !info.get_attribute_boolean('access::can-execute')) {
-                                continue;
-                            }
-                            let child = fileEnum.get_child(info);
-                            fileList.push([info.get_name(), isDir ? child : child.get_path(), isDir ? [] : null]);
-                            this._processedEntries++;
-                            if (this._processedEntries >= this._maxNumberOfTemplates) {
-                                break;
-                            }
-                        }
-                    } catch (e) {
-                        if (e.matches(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED)) {
-                            resolve(null);
-                        } else {
-                            reject(new GLib.Error(Gio.IOErrorEnum,
-                                Gio.IOErrorEnum.FAILED,
-                                'file-read-error'));
-                        }
-                        return;
-                    }
-                    fileList.sort((a, b) => {
-                        return a[0].localeCompare(b[0], {
-                            sensitivity: 'accent',
-                            numeric: 'true',
-                            localeMatcher: 'lookup',
-                        });
-                    });
-                    resolve(fileList);
+                    );
                 }
             );
+
+            this.updateEntries()
+            .catch(e => {
+                console.log(
+                    'Exception while updating entries: ' +
+                    `${e.message}\n${e.stack}`
+                );
+            });
+        }
+    }
+
+    async updateEntries() {
+        if (this._entriesEnumerateCancellable)
+            this._entriesEnumerateCancellable.cancel();
+
+
+        const cancellable = new Gio.Cancellable();
+        this._entriesEnumerateCancellable = cancellable;
+
+        this._entriesDirMonitors.forEach(f => {
+            f[0].disconnect(f[1]);
+            f[0].cancel();
         });
+
+        this._entriesDirMonitors = [];
+        this._menuEntries = new Set();
+
+        let entriesList;
+
+        try {
+            entriesList = await this._processDirectory(this._entriesDir,
+                cancellable);
+        } catch (e) {
+            if (!e.matches(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED) &&
+                !e.matches(Gio.IOErrorEnum, Gio.IOErrorEnum.NOT_FOUND))
+                console.error(e);
+        } finally {
+            if (this._entriesEnumerateCancellable === cancellable)
+                this._entriesEnumerateCancellable = null;
+        }
+
+        [this._entries, this.gioMenu] =
+            entriesList !== null
+                ? entriesList
+                : [null, null];
     }
 
-    createMenu() {
-        return this._createTemplatesScriptsSubMenu(this._entries);
-    }
+    async _processDirectory(directory, cancellable, recursionLevel = 0) {
+        const localRecursionLevel = recursionLevel += 1;
+        var files = null;
 
-    _createTemplatesScriptsSubMenu(scriptsList) {
-        if ((scriptsList == null) || (scriptsList.length == 0)) {
+        try {
+            files = await this._readDirectory(directory, cancellable);
+        } catch (e) {
+            console.error(e);
             return null;
         }
-        let scriptSubMenu = new Gtk.Menu();
-        for (let fileItem of scriptsList) {
-            let menuItemName = fileItem[0];
-            if (this._flags & TemplatesScriptsManagerFlags.HIDE_EXTENSIONS) {
-                menuItemName = DesktopIconsUtil.getFileExtensionOffset(menuItemName, false).basename;
+
+        if (files === null)
+            return null;
+
+        let outputEntries = [];
+        let menu = new Gio.Menu();
+        let menuhasentries = false;
+
+        for (let file of files) {
+            let menuItemName = file[0];
+
+            if (file[2] === null) {
+                outputEntries.push(file);
+                let menuItemPath = file[1];
+
+                if (this._menuEntries.has(menuItemPath))
+                    continue;
+
+                this._menuEntries.add(menuItemPath);
+                let menuItem = Gio.MenuItem.new(`${menuItemName}`, null);
+
+                menuItem.set_action_and_target_value(
+                    this._actionName,
+                    GLib.Variant.new('s', `${menuItemPath}`)
+                );
+
+                menu.append_item(menuItem);
+                menuhasentries = true;
+
+                continue;
             }
-            let menuItemPath = fileItem[1];
-            let subDirs = fileItem[2];
-            if (subDirs === null) {
-                let menuItem = new Gtk.MenuItem({label: menuItemName});
-                this.connectSignal(menuItem, 'activate', () => {
-                    this._activatedCB(menuItemPath);
-                });
-                scriptSubMenu.add(menuItem);
-            } else {
-                let subMenu = this._createTemplatesScriptsSubMenu(subDirs);
-                if (subMenu !== null) {
-                    let menuItem = new Gtk.MenuItem({label: menuItemName});
-                    menuItem.set_submenu(subMenu);
-                    scriptSubMenu.add(menuItem);
-                }
+
+            if (this._entriesDirMonitors.length > MAX_DIRS) {
+                console.log(
+                    'Limiting the number of folders monitored in ' +
+                    'templates/scripts...'
+                );
+                continue;
+            }
+
+            if (localRecursionLevel > MAX_MENU_DEPTH) {
+                console.log(
+                    'Limiting submenu depth of folders monitored' +
+                    ' in templates/scripts...'
+                );
+                continue;
+            }
+
+            let dirpath = file[1].get_path();
+
+            const newFileInfo =
+                // eslint-disable-next-line no-await-in-loop
+                await file[1].query_info_async(
+                    this.Enums.DEFAULT_ATTRIBUTES,
+                    Gio.FileQueryInfoFlags.NONE,
+                    GLib.PRIORITY_DEFAULT,
+                    cancellable
+                );
+
+            if (newFileInfo
+                .get_attribute_boolean(
+                    Gio.FILE_ATTRIBUTE_STANDARD_IS_SYMLINK
+                )
+            )
+                dirpath = newFileInfo.get_symlink_target();
+
+            if (this._menuEntries.has(dirpath))
+                continue;
+
+            this._menuEntries.add(dirpath);
+
+            let monitorDir =
+                file[1].monitor_directory(
+                    Gio.FileMonitorFlags.WATCH_MOVES,
+                    null
+                );
+
+            monitorDir.set_rate_limit(1000);
+
+            let monitorId =
+                monitorDir.connect(
+                    'changed',
+                    () => {
+                        this.updateEntries();
+                    }
+                );
+
+            this._entriesDirMonitors.push([monitorDir, monitorId]);
+
+            let submenu;
+            let subentriesList;
+
+            subentriesList =
+            // eslint-disable-next-line no-await-in-loop
+                await this._processDirectory(
+                    file[1],
+                    cancellable,
+                    localRecursionLevel
+                );
+
+            if (subentriesList === null)
+                return null;
+
+            [file[2], submenu] = subentriesList;
+
+            if (file[2].length !== 0)
+                outputEntries.push(file);
+
+            if (submenu) {
+                const menuItem =
+                    Gio.MenuItem.new_submenu(`${menuItemName}`, submenu);
+
+                menu.append_item(menuItem);
+                menuhasentries = true;
             }
         }
-        scriptSubMenu.show_all();
-        return scriptSubMenu;
+
+        if (!menuhasentries)
+            menu = null;
+
+        return [outputEntries, menu];
+    }
+
+    async _readDirectory(directory, cancellable) {
+        const childrenInfo =
+            await this.FileUtils.enumerateDir(
+                directory,
+                cancellable,
+                GLib.PRIORITY_DEFAULT,
+                this.Enums.DEFAULT_ATTRIBUTES
+            );
+
+        const fileList = [];
+
+        childrenInfo.forEach(info => {
+            const menuitemName = this._selectionFilter(info);
+
+            if (!menuitemName)
+                return;
+
+            if (fileList.length > MAX_MENUENTRIES) {
+                console.log('Truncating menu entries templates/scripts submenu');
+                return;
+            }
+
+            const isDir = info.get_file_type() === Gio.FileType.DIRECTORY;
+
+            const isSymlink =
+                info
+                .get_attribute_boolean(Gio.FILE_ATTRIBUTE_STANDARD_IS_SYMLINK);
+
+            if (isDir && isSymlink) {
+                console.warn(
+                    'Folder Symlink in monitored templates/scripts folder...\n',
+                    'This can lead to unlimited recursion.'
+                );
+            }
+
+            const child = directory.get_child(info.get_name());
+
+            fileList.push([
+                menuitemName,
+                isDir ? child : child.get_path(),
+                isDir ? [] : null,
+            ]);
+        });
+
+        fileList.sort(
+            (a, b) => {
+                return a[0]
+                .localeCompare(
+                    b[0],
+                    {
+                        sensitivity: 'accent',
+                        numeric: 'true',
+                        localeMatcher: 'lookup',
+                    }
+                );
+            }
+        );
+
+        return fileList;
+    }
+
+    getGioMenu() {
+        return this.gioMenu;
     }
 };

@@ -1,5 +1,6 @@
 /* DING: Desktop Icons New Generation for GNOME Shell
  *
+ * Copyright (C) 2022, 2025 Sundeep Mediratta (smedius@gmail.com) gtk4 port
  * Copyright (C) 2019 Sergio Costas (rastersoft@gmail.com)
  * Based on code original (C) Carlos Soriano
  *
@@ -15,51 +16,93 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-'use strict';
-const Gtk = imports.gi.Gtk;
-const DesktopIconsUtil = imports.desktopIconsUtil;
-const Gettext = imports.gettext.domain('ding');
+import {Adw, Gdk, Gio} from '../dependencies/gi.js';
+import {_} from '../dependencies/gettext.js';
 
-const _ = Gettext.gettext;
+export {ShowErrorPopup};
 
-var ShowErrorPopup = class {
-    constructor(text, secondaryText, modal) {
-        this._window = new Gtk.MessageDialog({
-            window_position: Gtk.WindowPosition.CENTER_ON_PARENT,
-            transient_for: null,
-            message_type: Gtk.MessageType.ERROR,
-            buttons: Gtk.ButtonsType.NONE,
-        });
-        let labels = this._window.get_message_area().get_children();
-        labels[1].set_justify(Gtk.Justification.CENTER);
-        this._window.secondary_use_markup = true;
-        this._window.text = text;
-        this._window.secondary_text = secondaryText;
-        DesktopIconsUtil.windowHidePagerTaskbarModal(this._window, true);
-        this.deleteButton = this._window.add_button(_('Close'), Gtk.ResponseType.OK);
-        this.deleteButton.connect('clicked', () => {
-            this._window.hide();
-            this._window.destroy();
-            this._window = null;
-        });
-        this._window.connect('delete-event', () => {
-            this._window.destroy();
-            this._window = null;
-        });
-        if (modal) {
-            this._window.show();
+const ShowErrorPopup = class {
+    constructor(text, secondaryText, waitDelayMs, helpURL = null) {
+        this._waitDelayMs = waitDelayMs; // async function
+        this._applicationId = Gio.Application.get_default();
+        this._window = this._applicationId.get_active_window();
+        this._dialog = new Adw.AlertDialog();
+        this._dialog.set_body_use_markup(true);
+        this._dialog.set_heading_use_markup(true);
+
+        if (text)
+            this._dialog.set_heading(text);
+
+        if (secondaryText)
+            this._dialog.set_body(secondaryText);
+
+        if (helpURL) {
+            this._helpURL = helpURL;
+            this._dialog.add_response('0', _('Cancel'));
+            this._dialog.add_response('1', _('More Information'));
+            this._dialog.set_close_response('0');
+            this._dialog.set_default_response('1');
+
+            this._dialog.set_response_appearance(
+                '1',
+                Adw.ResponseAppearance.SUGGESTED
+            );
+
+            this._dialog.set_response_appearance(
+                '0',
+                Adw.ResponseAppearance.DEFAULT
+            );
+
+            this._dialog.set_prefer_wide_layout(true);
+        } else {
+            this._dialog.add_response('0', _('Cancel'));
+            this._dialog.set_close_response('0');
+            this._dialog.set_default_response('0');
+
+            this._dialog.set_response_appearance(
+                '0',
+                Adw.ResponseAppearance.DEFAULT
+            );
         }
+        this._dialog.connect('response', this._callback.bind(this));
+    }
+
+    show() {
+        this._dialog.present(this._window);
+    }
+
+    _callback(actor, response) {
+        if (response === '1' && this._helpURL)
+            this._launchUri(this._helpURL);
     }
 
     run() {
-        this._window.show();
-        this.timeoutClose(3000);
+        return new Promise(resolve => {
+            this._dialog.choose(this._window, null, (actor, asyncResult) => {
+                const response = actor.choose_finish(asyncResult);
+                resolve(response);
+            });
+        });
     }
 
-    async timeoutClose(time) {
-        await DesktopIconsUtil.waitDelayMs(time);
-        if (this._window) {
-            this.deleteButton.activate();
-        }
+    async runAutoClose(time) {
+        this.show();
+        await this._timeoutClose(time);
+    }
+
+    close() {
+        this._dialog.close();
+    }
+
+    async _timeoutClose(time) {
+        await this._waitDelayMs(time);
+        this._dialog.set_response_enabled('0', false);
+        this.close();
+    }
+
+    _launchUri(uri) {
+        const context = Gdk.Display.get_default().get_app_launch_context();
+        context.set_timestamp(Gdk.CURRENT_TIME);
+        Gio.AppInfo.launch_default_for_uri(uri, context);
     }
 };

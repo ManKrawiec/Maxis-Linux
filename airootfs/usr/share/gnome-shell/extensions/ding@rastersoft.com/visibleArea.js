@@ -14,12 +14,16 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-'use strict';
-const Signals = imports.signals;
-import * as Main from 'resource:///org/gnome/shell/ui/main.js'
-import GLib from 'gi://GLib'
 
-export class VisibleArea {
+import GLib from 'gi://GLib';
+
+import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+
+export {VisibleArea};
+
+const Signals = imports.signals;
+
+var VisibleArea = class {
     constructor() {
         this._usableAreas = {};
         this._marginsList = {};
@@ -36,17 +40,17 @@ export class VisibleArea {
     }
 
     setMarginsForExtension(extensionUUID, margins) {
-        if (margins == null) {
-            if (!(extensionUUID in this._marginsList)) {
+        if (margins === null) {
+            if (!(extensionUUID in this._marginsList))
                 return;
-            }
+
             delete this._marginsList[extensionUUID];
         } else {
             this._marginsList[extensionUUID] = margins;
         }
-        if (this._refreshTimerId) {
+        if (this._refreshTimerId)
             GLib.source_remove(this._refreshTimerId);
-        }
+
         this._refreshTimerId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 250, () => {
             this._refreshMargins();
             this._refreshTimerId = null;
@@ -60,9 +64,9 @@ export class VisibleArea {
             let margins = this._marginsList[extensionUUID];
             for (let workspace in margins) {
                 let index = workspace;
-                if (workspace < 0) {
+                if (workspace < 0)
                     index = Main.layoutManager.primaryIndex;
-                }
+
                 if (!(index in this._usableAreas)) {
                     this._usableAreas[index] = {
                         top: 0,
@@ -71,9 +75,8 @@ export class VisibleArea {
                         right: 0,
                     };
                 }
-                for (let index2 of ['top', 'bottom', 'left', 'right']) {
+                for (let index2 of ['top', 'bottom', 'left', 'right'])
                     this._usableAreas[index][index2] = Math.max(this._usableAreas[index][index2], margins[workspace][index2]);
-                }
             }
         }
         this.emit('updated-usable-area');
@@ -120,10 +123,25 @@ export class VisibleArea {
             // If the margins for this monitor are bigger than the margins calculated previously,
             // use the higher number. This is because the margin set from the extensions are be from the monitor border,
             // an can supersede the ones that actually form the work area border.
-            marginTop = Math.max(marginTop, this._usableAreas[monitorIndex]['top']);
-            marginBottom = Math.max(marginBottom, this._usableAreas[monitorIndex]['bottom']);
-            marginLeft = Math.max(marginLeft, this._usableAreas[monitorIndex]['left']);
-            marginRight = Math.max(marginRight, this._usableAreas[monitorIndex]['right']);
+
+            // Indirectly flag hidden margins if usableAreas margin is set //
+
+            const hiddenMargin = 1000;
+
+            if (this._usableAreas[monitorIndex]['top'] > marginTop)
+                marginTop = this._usableAreas[monitorIndex]['top'] + hiddenMargin;
+
+
+            if (this._usableAreas[monitorIndex]['bottom'] > marginBottom)
+                marginBottom = this._usableAreas[monitorIndex]['bottom'] + hiddenMargin;
+
+
+            if (this._usableAreas[monitorIndex]['left'] > marginLeft)
+                marginLeft = this._usableAreas[monitorIndex]['left'] + hiddenMargin;
+
+
+            if (this._usableAreas[monitorIndex]['right'] > marginRight)
+                marginRight = this._usableAreas[monitorIndex]['right'] + hiddenMargin;
         }
 
         return {

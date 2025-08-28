@@ -1,6 +1,7 @@
 
 /* DING: Desktop Icons New Generation for GNOME Shell
  *
+ * Gtk4 Port Copyright (C) 2022- 2025 Sundeep Mediratta (smedius@gmail.com)
  * Copyright (C) 2021 Sundeep Mediratta (smedius@gmail.com)
  * Copyright (C) 2019 Sergio Costas (rastersoft@gmail.com)
  * Based on code original (C) Carlos Soriano
@@ -18,103 +19,93 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-/* exported dropDestination */
-'use strict';
-const Gtk = imports.gi.Gtk;
-const Gdk = imports.gi.Gdk;
-const Gio = imports.gi.Gio;
-const Atk = imports.gi.Atk;
-const GLib = imports.gi.GLib;
-const GObject = imports.gi.GObject;
-const Pango = imports.gi.Pango;
-const GdkPixbuf = imports.gi.GdkPixbuf;
-const Cairo = imports.gi.cairo;
-const DesktopIconsUtil = imports.desktopIconsUtil;
+import {Gtk, Gdk, Gio, Graphene, GLib, Pango, GdkPixbuf}
+    from '../dependencies/gi.js';
 
-const Prefs = imports.preferences;
-const Enums = imports.enums;
-const SignalManager = imports.signalManager;
+import {_} from '../dependencies/gettext.js';
 
-const ByteArray = imports.byteArray;
+export {DesktopIconItem};
+
 const Signals = imports.signals;
-const Gettext = imports.gettext.domain('ding');
 
-const _ = Gettext.gettext;
+const PIXBUF_CONTENT_TYPES = new Set();
 
-var desktopIconItem = class desktopIconItem extends SignalManager.SignalManager {
-    constructor(desktopManager, fileExtra) {
-        super();
+GdkPixbuf.Pixbuf
+.get_formats()
+.forEach(f => PIXBUF_CONTENT_TYPES.add(...f.get_mime_types()));
+
+const DesktopIconItem = class {
+    constructor(desktopManager, fileTypeEnum) {
         this._desktopManager = desktopManager;
-        this._fileExtra = fileExtra;
-        this._loadThumbnailDataCancellable = null;
+        this._dragManager = desktopManager.dragManager;
+        this.DesktopIconsUtil = desktopManager.DesktopIconsUtil;
+        this.FileUtils = desktopManager.FileUtils;
+        this.Prefs = desktopManager.Prefs;
+        this.Enums = desktopManager.Enums;
+        this.ThumbnailLoader = desktopManager.ThumbnailLoader;
+        this._fileTypeEnum = fileTypeEnum;
         this._queryFileInfoCancellable = null;
         this._grid = null;
+        this._column = null;
+        this._row = null;
         this._lastClickTime = 0;
         this._lastClickButton = 0;
         this._clickCount = 0;
         this._isSelected = false;
-        this._isKeyboardSelected = false;
         this._isSpecial = false;
-        this._primaryButtonPressed = false;
         this._savedCoordinates = null;
         this._dropCoordinates = null;
+        this._normalCoordinates = null;
+        this._monitorIndex = null;
         this._destroyed = false;
+        this.thumbnailFile = null;
     }
 
     /** *********************
      * Destroyers *
      ***********************/
 
-    removeFromGrid(callOnDestroy) {
+    removeFromGrid(opts = {callOnDestroy: false}) {
         if (this._grid) {
             this._grid.removeItem(this);
             this._grid = null;
         }
-        if (callOnDestroy) {
-            this._onDestroy();
-        }
+
+        if (opts.callOnDestroy)
+            this.onDestroy();
     }
 
     _destroy() {
-        this._destroyed = true;
         /* Regular file data */
-        if (this._queryFileInfoCancellable) {
+        if (this._queryFileInfoCancellable)
             this._queryFileInfoCancellable.cancel();
-            this._queryFileInfoCancellable = null;
+
+        /* Icons update */
+        if (this._updateIconCancellable)
+            this._updateIconCancellable.cancel();
+
+        /* Container */
+        if (this._containerId) {
+            this.container.disconnect(this._containerId);
+            this._containerId = 0;
         }
 
-        /* Thumbnailing */
-        if (this._loadThumbnailDataCancellable) {
-            this._loadThumbnailDataCancellable.cancel();
-            this._loadThumbnailDataCancellable = null;
-        }
-        /* Disconnect signals */
-        this.disconnectAllSignals();
-        this.container.destroy();
-        this.container = null;
-        this._eventBox = null;
-        this._shieldEventBox = null;
-        this._labelEventBox = null;
-        this._shieldLabelEventBox = null;
-        this._icon = null;
-        this._iconContainer = null;
-        this._label = null;
-        this._labelContainer = null;
-        this.iconRectangle = null;
-        if (this._grid) {
-            this._grid.removeItem(this);
-            this._grid = null;
-        }
-        this._desktopManager = null;
-        this._fileExtra = null;
-        this._savedCoordinates = null;
-        this._dropCoordinates = null;
+        /* DragItem */
+        if (this.dragIconSignal)
+            this.dragIcon.disconnect(this.dragIconSignal);
+
+        if (this._iconStateFlag)
+            this._iconContainer.disconnect(this._iconStateFlag);
+
+        if (this._labelStateFlag)
+            this._labelContainer.disconnect(this._labelStateFlag);
+
+        this._destroyToolTip();
     }
 
-    _onDestroy() {
-        if (!this._destroyed) {
-            this._destroy();
-        }
+    onDestroy() {
+        this._destroy();
+        this._destroyed = true;
     }
 
     /** *********************
@@ -122,126 +113,158 @@ var desktopIconItem = class desktopIconItem extends SignalManager.SignalManager 
      ***********************/
 
     _createIconActor() {
-        this.container = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL, halign: Gtk.Align.CENTER});
-        this._eventBox = new Gtk.EventBox({visible: true, halign: Gtk.Align.CENTER});
-        this._shieldEventBox = new Gtk.EventBox({visible: true, halign: Gtk.Align.CENTER});
-        this._labelEventBox = new Gtk.EventBox({visible: true, halign: Gtk.Align.CENTER});
-        this._shieldLabelEventBox = new Gtk.EventBox({visible: true, halign: Gtk.Align.CENTER});
+        this.container =
+            new Gtk.Box({
+                orientation: Gtk.Orientation.VERTICAL,
+                halign: Gtk.Align.CENTER,
+                focusable: true,
+                can_focus: true,
+                accessible_role: Gtk.AccessibleRole.LABEL,
+            });
 
-        this._icon = new Gtk.Image();
-        this._iconContainer = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL});
-        this._iconContainer.pack_start(this._icon, true, true, 0);
-        this._iconContainer.set_baseline_position(Gtk.BaselinePosition.CENTER);
-        this._eventBox.add(this._iconContainer);
-        this._shieldEventBox.add(this._eventBox);
+        this._containerId =
+            this.container.connect('destroy', () => this.onDestroy());
 
-        this._label = new Gtk.Label();
-        this._containerAccessibility = this.container;
-        this._containerAccessibility.set_can_focus(true);
-        this._labelContainer = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL, halign: Gtk.Align.CENTER});
-        let labelStyleContext = this._label.get_style_context();
-        if (this._desktopManager.darkText) {
-            labelStyleContext.add_class('file-label-dark');
-        } else {
-            labelStyleContext.add_class('file-label');
-        }
-        labelStyleContext = undefined; // prevent memory leaks
-        this._label.set_ellipsize(Pango.EllipsizeMode.END);
-        this._label.set_line_wrap(true);
-        this._label.set_line_wrap_mode(Pango.WrapMode.WORD_CHAR);
-        this._label.set_yalign(0.0);
-        this._label.set_justify(Gtk.Justification.CENTER);
-        this._label.set_lines(2);
-        this._labelContainer.pack_start(this._label, false, true, 0);
-        this._labelEventBox.add(this._labelContainer);
-        this._shieldLabelEventBox.add(this._labelEventBox);
+        this._icon = new Gtk.Picture({
+            can_shrink: false,
+            keep_aspect_ratio: true,
+            halign: Gtk.Align.CENTER,
+        });
 
-        this.container.pack_start(this._shieldEventBox, false, false, 0);
-        this.container.pack_start(this._shieldLabelEventBox, false, false, 0);
+        this._iconContainer = new Gtk.Box({
+            orientation: Gtk.Orientation.HORIZONTAL,
+            halign: Gtk.Align.CENTER,
+            hexpand: false,
+            baseline_position: Gtk.BaselinePosition.CENTER,
+        });
 
-        this._fullStyleContext = this.container.get_style_context();
-        this._styleContext = this._iconContainer.get_style_context();
-        this._labelStyleContext = this._labelContainer.get_style_context();
-        this._styleContext.add_class('file-item');
-        this._labelStyleContext.add_class('file-item');
+        this._iconContainer.append(this._icon);
+
+        this._label = new Gtk.Label({
+            halign: Gtk.Align.CENTER,
+            natural_wrap_mode: Gtk.NaturalWrapMode.WORD,
+            ellipsize: Pango.EllipsizeMode.END,
+            wrap: true,
+            wrap_mode: Pango.WrapMode.WORD_CHAR,
+            yalign: 0.0,
+            xalign: 0.0,
+            justify: Gtk.Justification.CENTER,
+            lines: 2,
+        });
+
+        this._labelContainer = new Gtk.Box({
+            orientation: Gtk.Orientation.VERTICAL,
+            name: 'file-item',
+        });
 
         this.iconRectangle = new Gdk.Rectangle();
+        this.iconLocalWindowRectangle = new Gdk.Rectangle();
         this.labelRectangle = new Gdk.Rectangle();
 
-        /* We need to allow the "button-press" event to pass through the callbacks, to allow the DnD to work
-         * But we must avoid them to reach the main window.
-         * The solution is to allow them to pass in a EventBox, used both for detecting the events and the DnD, and block them
-         * in a second EventBox, located outside.
-         */
-        this.connectSignal(this._shieldEventBox, 'button-press-event', (actor, event) => {
-            return true;
-        });
-        this.connectSignal(this._shieldLabelEventBox, 'button-press-event', (actor, event) => {
-            return true;
-        });
-        this.connectSignal(this._eventBox, 'button-press-event', (actor, event) => this._onPressButton(actor, event));
-        this.connectSignal(this._eventBox, 'enter-notify-event', (actor, event) => this._onEnter(this._eventBox));
-        this.connectSignal(this._eventBox, 'leave-notify-event', (actor, event) => this._onLeave(this._eventBox));
-        this.connectSignal(this._eventBox, 'button-release-event', (actor, event) => this._onReleaseButton(actor, event));
-        this.connectSignal(this._eventBox, 'drag-motion', (widget, context, x, y, time) => {
-            this.highLightDropTarget(x, y);
-            this._updateDragStatus(context, time);
-        });
-        this.connectSignal(this._eventBox, 'drag-leave', () => {
-            this.unHighLightDropTarget();
-        });
-        this.connectSignal(this._eventBox, 'size-allocate', () => this._calculateIconRectangle());
-        this.connectSignal(this._labelEventBox, 'button-press-event', (actor, event) => this._onPressButton(actor, event));
-        this.connectSignal(this._labelEventBox, 'enter-notify-event', (actor, event) => this._onEnter(this._labelEventBox));
-        this.connectSignal(this._labelEventBox, 'leave-notify-event', (actor, event) => this._onLeave(this._labelEventBox));
-        this.connectSignal(this._labelEventBox, 'button-release-event', (actor, event) => this._onReleaseButton(actor, event));
-        this.connectSignal(this._labelEventBox, 'drag-motion', (widget, context, x, y, time) => {
-            this.highLightDropTarget(x, y);
-            this._updateDragStatus(context, time);
-        });
-        this.connectSignal(this._labelEventBox, 'drag-leave', () => {
-            this.unHighLightDropTarget();
-        });
-        this.connectSignal(this._labelEventBox, 'size-allocate', () => {
-            this._doLabelSizeAllocated();
-        });
-        this.connectSignal(this.container, 'drag-motion', (widget, context, x, y, time) => {
-            this.highLightDropTarget(x, y);
-            this._updateDragStatus(context, time);
-        });
-        this.connectSignal(this.container, 'drag-leave', () => {
-            this.unHighLightDropTarget();
+        this._iconContainerEventController = new Gtk.EventControllerMotion({
+            propagation_phase: Gtk.PropagationPhase.CAPTURE,
         });
 
-        if (this._desktopManager.showDropPlace) {
-            this._setDropDestination(this.container);
+        this._icon.add_controller(this._iconContainerEventController);
+
+        this._iconContainerEventController.connect('enter', () => {
+            this._showToolTip();
+        });
+
+        this._iconContainerEventController.connect('leave', () => {
+            this._destroyToolTip();
+        });
+
+        // This controls how the icons look - Rectangular or skinny trapezoid
+
+        if (!this.Prefs.freePositionIcons) {
+            this._labelContainer.append(this._iconContainer);
+            this._label.add_css_class('file-label-vertical');
+            this._labelContainer.append(this._label);
+            this.container.append(this._labelContainer);
         } else {
-            this._setDropDestination(this._eventBox);
-            this._setDropDestination(this._labelEventBox);
+            this._labelContainer.append(this._label);
+            this.container.append(this._iconContainer);
+            this.container.append(this._labelContainer);
+
+            this._iconStateFlag =
+                this._iconContainer.connect('state-flags-changed', () => {
+                    if (this._checkHasHoveredPointer(this._iconContainer)) {
+                        this._onEnter();
+                        this._labelContainer.add_css_class('mimic-hovered');
+                    } else {
+                        this._onLeave();
+                        this._labelContainer.remove_css_class('mimic-hovered');
+                    }
+                });
+
+            this._iconContainer.set_name('file-item');
         }
-        this._setDragSource(this._eventBox);
-        this._setDragSource(this._labelEventBox);
-        this.container.show_all();
+
+        this._labelStateFlag =
+            this._labelContainer.connect('state-flags-changed', () => {
+                if (this._checkHasHoveredPointer(this._labelContainer)) {
+                    this._onEnter();
+
+                    if (this.Prefs.freePositionIcons)
+                        this._iconContainer.add_css_class('mimic-hovered');
+                } else {
+                    this._onLeave();
+
+                    if (this.Prefs.freePositionIcons)
+                        this._iconContainer.remove_css_class('mimic-hovered');
+                }
+            });
+
+        this.dragIcon = Gtk.WidgetPaintable.new(this.container);
+
+        this.dragIconSignal = this.dragIcon.connect('invalidate-size', () => {
+            this._doIconSizeAllocated();
+        });
+
+        this.container.show();
     }
 
-    _doLabelSizeAllocated() {
+    _doIconSizeAllocated() {
+        // If icons are hidden during stacking, they are not assigned a grid //
+        if (!this._grid)
+            return;
+
+        this._calculateIconRectangle();
         this._calculateLabelRectangle();
+        this.iconPlacedPromiseResolve(true);
     }
+
+    iconPlaced = new Promise(resolve => {
+        this.iconPlacedPromiseResolve = resolve;
+    });
 
     _calculateIconRectangle() {
         this.iconwidth = this._iconContainer.get_allocated_width();
         this.iconheight = this._iconContainer.get_allocated_height();
-        let [x, y] = this._grid.coordinatesLocalToGlobal(0, 0, this._iconContainer);
+        const [x, y] =
+            this._grid.coordinatesLocalToGlobal(0, 0, this._iconContainer);
         this.iconRectangle.x = x;
         this.iconRectangle.y = y;
         this.iconRectangle.width = this.iconwidth;
         this.iconRectangle.height = this.iconheight;
+        this._calculateLocalWindowRectangle();
+    }
+
+    _calculateLocalWindowRectangle() {
+        const [x, y] =
+            this._grid.coordinatesLocalToWindow(0, 0, this._iconContainer);
+        this.iconLocalWindowRectangle.x = x;
+        this.iconLocalWindowRectangle.y = y;
+        this.iconLocalWindowRectangle.width = this.iconwidth;
+        this.iconLocalWindowRectangle.height = this.iconheight;
     }
 
     _calculateLabelRectangle() {
         this.labelwidth = this._labelContainer.get_allocated_width();
         this.labelheight = this._labelContainer.get_allocated_height();
-        let [x, y] = this._grid.coordinatesLocalToGlobal(0, 0, this._labelContainer);
+        const [x, y] =
+            this._grid.coordinatesLocalToGlobal(0, 0, this._labelContainer);
         this.labelRectangle.x = x;
         this.labelRectangle.y = y;
         this.labelRectangle.width = this.labelwidth;
@@ -266,183 +289,302 @@ var desktopIconItem = class desktopIconItem extends SignalManager.SignalManager 
     getCoordinates() {
         this._x2 = this._x1 + this.container.get_allocated_width() - 1;
         this._y2 = this._y1 + this.container.get_allocated_height() - 1;
+
         return [this._x1, this._y1, this._x2, this._y2, this._grid];
+    }
+
+    writeSavedCoordinates(pos) {
+        this._parseSavedCoordinates(pos);
+    }
+
+    writeDropCoordinates(pos) {
+        this._parseDropCoordinates(pos);
+    }
+
+    readSavedCoordinates() {
+        this._parseSavedCoordinates([]);
+    }
+
+    readDropCoordinates() {
+        this._parseDropCoordinates([]);
+    }
+
+    _parseDropCoordinates(pos) {
+        if (!Array.isArray(pos) || pos.some(e => isNaN(e))) {
+            this._dropCoordinates = null;
+            return;
+        }
+        pos = pos.map(e => Number(e));
+        if (pos?.length === 2)
+            this._dropCoordinates = pos;
+        else
+            this._dropCoordinates = null;
+    }
+
+    _parseSavedCoordinates(pos) {
+        if (!Array.isArray(pos) || pos.some(e => isNaN(e))) {
+            this._savedCoordinates = null;
+            this._normalCoordinates = null;
+            this._monitorIndex = null;
+            return;
+        }
+        pos = pos.map(e => Number(e));
+        if (pos?.length === 2) {
+            this._savedCoordinates = pos;
+            this._normalCoordinates = null;
+            this._monitorIndex = null;
+        } else if (pos?.length === 5) {
+            this._savedCoordinates = pos.slice(0, 2);
+            this._normalCoordinates = pos.slice(2, 4);
+            this._monitorIndex = pos[4];
+        } else {
+            this._savedCoordinates = null;
+            this._normalCoordinates = null;
+            this._monitorIndex = null;
+        }
     }
 
     _setLabelName(text) {
         this._currentFileName = text;
-        this._eventBox.set_tooltip_text(text);
-        let lastCutPos = -1;
-        let newText = '';
-        for (let pos = 0; pos < text.length; pos++) {
-            let character = text[pos];
-            newText += character;
-            if (pos < (text.length - 1)) {
-                var nextChar = text[pos + 1];
-            } else {
-                var nextChar = '';
-            }
-            if (character == ' ') {
-                lastCutPos = pos;
-            }
-            if (['.', ',', '-', '_', '@', ':'].includes(character)) {
-                /* if the next character is already an space or this is the last
-                 * character, the string will be naturally cut here, so we do
-                 * nothing.
-                 */
-                if ((nextChar == ' ') || (nextChar == '')) {
-                    continue;
-                }
-                /* if there is a cut element in the last four previous characters,
-                 * do not add a new cut element.
-                 */
-                if ((lastCutPos > -1) && ((pos - lastCutPos) < 4)) {
-                    continue;
-                }
-                newText += '\u200B';
-            }
-        }
-        this._label.label = newText;
+        this._label.label = text;
     }
 
     /** *********************
      * Button Clicks *
      ***********************/
 
-    _updateClickState(event) {
-        let settings = Gtk.Settings.get_default();
+    _checkHasHoveredPointer(widget) {
+        let stateFlags = widget.get_state_flags();
+        if ((stateFlags & Gtk.StateFlags.PRELIGHT) === Gtk.StateFlags.PRELIGHT)
+            return true;
+        else
+            return false;
+    }
 
-        if ((event.get_button()[1] == this._lastClickButton) &&
-            ((event.get_time() - this._lastClickTime) < settings.gtk_double_click_time)) {
-            this._clickCount++;
-        } else {
-            this._clickCount = 1;
+    _updateClickState(button, eventtime) {
+        const settings = Gtk.Settings.get_default();
+        let doubleClickTime = settings.gtk_double_click_time;
+
+        // Workaround for X11
+        if (this.DesktopIconsUtil.usingX11) {
+            eventtime = GLib.get_monotonic_time();
+            doubleClickTime *= 1000;
         }
 
-        this._lastClickTime = event.get_time();
-        this._lastClickButton = event.get_button()[1];
+        if ((button === this._lastClickButton) &&
+            ((eventtime - this._lastClickTime) < doubleClickTime))
+            this._clickCount++;
+        else
+            this._clickCount = 1;
+
+        this._lastClickTime = eventtime;
+        this._lastClickButton = button;
     }
 
     getClickCount() {
         return this._clickCount;
     }
 
-    _onPressButton(actor, event) {
-        this._updateClickState(event);
-        let button = event.get_button()[1];
-        let [a, x, y] = event.get_coords();
-        let state = event.get_state()[1];
-        this._buttonPressInitialX = x;
-        this._buttonPressInitialY = y;
-        let shiftPressed = !!(state & Gdk.ModifierType.SHIFT_MASK);
-        let controlPressed = !!(state & Gdk.ModifierType.CONTROL_MASK);
-        if (button == 3) {
-            this._doButtonThreePressed(event, shiftPressed, controlPressed);
-        } else if (button == 1) {
-            this._doButtonOnePressed(event, shiftPressed, controlPressed);
+    _onPressButton(actor, X, Y, x, y, shiftPressed, controlPressed) {
+        const button = actor.get_current_button();
+        const eventtime = actor.get_current_event_time();
+
+        this._updateClickState(button, eventtime);
+
+        this._buttonPressInitialX = x - this._x1;
+        this._buttonPressInitialY = y - this._y1;
+
+        this._desktopManager.activeFileItem = this;
+
+        if (button === 3) {
+            this._doButtonThreePressed(
+                button,
+                X, Y,
+                x, y,
+                shiftPressed,
+                controlPressed
+            );
+        } else if (button === 1) {
+            this._doButtonOnePressed(
+                button,
+                X, Y,
+                x, y,
+                shiftPressed,
+                controlPressed
+            );
         }
-        return false;
     }
 
-    _onReleaseButton(actor, event) {
-        let button = event.get_button()[1];
-        if (button == 1) {
-            this._doButtonOneReleased(event);
+    _onReleaseButton(actor, X, Y, x, y, shiftPressed, controlPressed) {
+        let button = actor.get_current_button();
+        this._grid?.makeTopLayerOnGrid(this);
+
+        if (button === 1) {
+            this._doButtonOneReleased(
+                button,
+                X, Y,
+                x, y,
+                shiftPressed,
+                controlPressed
+            );
         }
-        return false;
     }
 
-    _doButtonThreePressed(event) {
-        if (!this._isSelected) {
-            this._desktopManager.selected(this, Enums.Selection.RIGHT_BUTTON);
-        }
-        this._desktopManager.fileItemMenu.showMenu(this, event);
+    _doButtonThreePressed(button, X, Y, x, y, shiftPressed, controlPressed) {
+        if (!this._isSelected)
+            this._dragManager.selected(this, this.Enums.Selection.RIGHT_BUTTON);
+
+        this._destroyToolTip();
+
+        this._desktopManager.fileItemMenu.showMenu(
+            this,
+            button,
+            X, Y,
+            x, y,
+            shiftPressed,
+            controlPressed
+        );
     }
 
-    _doButtonOnePressed(event, shiftPressed, controlPressed) {
-        if (this.getClickCount() == 1) {
-            this._primaryButtonPressed = true;
+    _doButtonOnePressed(button, X, Y, x, y, shiftPressed, controlPressed) {
+        if (this.getClickCount() === 1) {
             if (shiftPressed || controlPressed) {
-                this._desktopManager.selected(this, Enums.Selection.WITH_SHIFT);
+                this._dragManager.selected(
+                    this,
+                    this.Enums.Selection.WITH_SHIFT
+                );
             } else {
-                this._desktopManager.selected(this, Enums.Selection.ALONE);
+                this._dragManager.selected(
+                    this,
+                    this.Enums.Selection.ALONE
+                );
             }
         }
     }
 
-    _doButtonOneReleased(event) {
+    // eslint-disable-next-line no-unused-vars
+    _doButtonOneReleased(button, X, Y, x, y, shiftPressed, controlPressed) {
     }
 
     /** *********************
      * Drag and Drop *
      ***********************/
 
-    _onEnter(element) {
-        if (!this._styleContext.has_class('file-item-hover')) {
-            this._styleContext.add_class('file-item-hover');
-            this._labelStyleContext.add_class('file-item-hover');
+    _onEnter() {
+        if (!this._grid)
+            return true;
+
+        if (this.Prefs.CLICK_POLICY_SINGLE) {
+            let window = this._grid._window;
+
+            if (window)
+                window.set_cursor(Gdk.Cursor.new_from_name('hand', null));
         }
-        if (Prefs.CLICK_POLICY_SINGLE) {
-            let window = element.get_window();
-            if (window) {
-                window.set_cursor(Gdk.Cursor.new_from_name(Gdk.Display.get_default(), 'hand'));
-            }
-        }
+
         return false;
     }
 
-    _onLeave(element) {
-        this._primaryButtonPressed = false;
-        if (this._styleContext.has_class('file-item-hover')) {
-            this._styleContext.remove_class('file-item-hover');
-            this._labelStyleContext.remove_class('file-item-hover');
+    _onLeave() {
+        if (!this._grid)
+            return true;
+
+        if (this.Prefs.CLICK_POLICY_SINGLE) {
+            let window = this._grid._window;
+
+            if (window)
+                window.set_cursor(Gdk.Cursor.new_from_name('default', null));
         }
-        if (Prefs.CLICK_POLICY_SINGLE) {
-            let window = element.get_window();
-            if (window) {
-                window.set_cursor(Gdk.Cursor.new_from_name(Gdk.Display.get_default(), 'default'));
-            }
-        }
+
         return false;
+    }
+
+    _showToolTip() {
+        if (this._toolTipTimer)
+            return;
+
+        this._toolTipTimer =
+            GLib.timeout_add(
+                GLib.PRIORITY_DEFAULT,
+                this.Enums.TOOLTIP_HOVER_TIMEOUT,
+                () => {
+                    this._desktopManager.fileItemMenu.showToolTip(this);
+                    this._toolTipTimer = 0;
+                    return GLib.SOURCE_REMOVE;
+                }
+            );
+    }
+
+    _destroyToolTip() {
+        if (this._toolTipTimer) {
+            GLib.Source.remove(this._toolTipTimer);
+            this._toolTipTimer = 0;
+        }
+
+        this._desktopManager.fileItemMenu.hideToolTip(this);
     }
 
     _hasToRouteDragToGrid() {
-        if (this._grid) {
+        if (this._grid)
             return true;
-        }
-        return false;
+        else
+            return false;
     }
 
     _updateDragStatus(context, time) {
-        if (DesktopIconsUtil.getModifiersInDnD(context, Gdk.ModifierType.CONTROL_MASK)) {
+        if (this.DesktopIconsUtil
+            .getModifiersInDnD(context, Gdk.ModifierType.CONTROL_MASK)
+        )
             Gdk.drag_status(context, Gdk.DragAction.COPY, time);
-        } else {
+        else
             Gdk.drag_status(context, Gdk.DragAction.MOVE, time);
-        }
+    }
+
+    setHighLighted() {
+        if (!this._iconContainer
+            .get_css_classes()
+            .includes('desktop-icons-selected')
+        )
+            this._iconContainer.add_css_class('desktop-icons-selected');
+
+        if (!this._labelContainer
+            .get_css_classes()
+            .includes('desktop-icons-selected')
+        )
+            this._labelContainer.add_css_class('desktop-icons-selected');
+    }
+
+    setUnHighLighted() {
+        if (this._iconContainer
+            .get_css_classes()
+            .includes('desktop-icons-selected')
+        )
+            this._iconContainer.remove_css_class('desktop-icons-selected');
+
+        if (this._labelContainer
+            .get_css_classes()
+            .includes('desktop-icons-selected')
+        )
+            this._labelContainer.remove_css_class('desktop-icons-selected');
     }
 
     highLightDropTarget() {
         if (this._hasToRouteDragToGrid()) {
             this._grid.receiveMotion(this._x1, this._y1, true);
+
             return;
         }
-        if (!this._styleContext.has_class('desktop-icons-selected')) {
-            this._styleContext.add_class('desktop-icons-selected');
-            this._labelStyleContext.add_class('desktop-icons-selected');
-        }
-        this._grid.highLightGridAt(this._x1, this._y1);
+
+        this.setHighLighted();
+        this._grid?.highLightGridAt(this._x1, this._y1);
     }
 
     unHighLightDropTarget() {
         if (this._hasToRouteDragToGrid()) {
-            this._grid.receiveLeave();
+            this._grid?.receiveLeave();
             return;
         }
-        if (!this._isSelected && this._styleContext.has_class('desktop-icons-selected')) {
-            this._styleContext.remove_class('desktop-icons-selected');
-            this._labelStyleContext.remove_class('desktop-icons-selected');
-        }
-        this._grid.unHighLightGrids();
+        this.setUnHighLighted();
+        this._grid?.unHighLightGrids();
     }
 
     setSelected() {
@@ -461,289 +603,310 @@ var desktopIconItem = class desktopIconItem extends SignalManager.SignalManager 
     }
 
     _setSelectedStatus() {
-        if (this._isSelected && !this._styleContext.has_class('desktop-icons-selected')) {
-            this._styleContext.add_class('desktop-icons-selected');
-            this._labelStyleContext.add_class('desktop-icons-selected');
-            if (!this._isKeyboardSelected) {
-                this._containerAccessibility.grab_focus();
-            }
+        if (this._isSelected) {
+            this.setHighLighted();
+            this.container.grab_focus();
         }
-        if (!this._isSelected && this._styleContext.has_class('desktop-icons-selected')) {
-            this._styleContext.remove_class('desktop-icons-selected');
-            this._labelStyleContext.remove_class('desktop-icons-selected');
-        }
-        if (this._isKeyboardSelected && !this._fullStyleContext.has_class('desktop-icons-selected')) {
-            this._fullStyleContext.add_class('desktop-icons-selected');
-            this._containerAccessibility.grab_focus();
-        }
-        if (!this._isKeyboardSelected && this._fullStyleContext.has_class('desktop-icons-selected')) {
-            this._fullStyleContext.remove_class('desktop-icons-selected');
-        }
-        this.setAccessibleName();
+        if (!this._isSelected)
+            this.setUnHighLighted();
     }
 
-    setAccessibleName() {}
-
-    _setDragSource(widget) {
-        widget.drag_source_set(Gdk.ModifierType.BUTTON1_MASK, null, Gdk.DragAction.MOVE | Gdk.DragAction.COPY);
-        let targets = new Gtk.TargetList(null);
-        targets.add(Gdk.atom_intern('x-special/ding-icon-list', false),
-            Gtk.TargetFlags.SAME_APP, Enums.DndTargetInfo.DING_ICON_LIST);
-        if ((this._fileExtra != Enums.FileType.USER_DIRECTORY_TRASH) &&
-            (this._fileExtra != Enums.FileType.USER_DIRECTORY_HOME) &&
-            (this._fileExtra != Enums.FileType.EXTERNAL_DRIVE)) {
-            targets.add(Gdk.atom_intern('x-special/gnome-icon-list', false), 0,
-                Enums.DndTargetInfo.GNOME_ICON_LIST);
-            targets.add(Gdk.atom_intern('text/uri-list', false), 0,
-                Enums.DndTargetInfo.URI_LIST);
-        }
-        widget.drag_source_set_target_list(targets);
-        targets = undefined; // prevent memory leaks
-        this.connectSignal(widget, 'drag-begin', (w, context) => {
-            const scale = this._icon.get_scale_factor();
-            let surf = new Cairo.ImageSurface(Cairo.SurfaceType.IMAGE, this.container.get_allocated_width() * scale, this.container.get_allocated_height() * scale);
-            // setDeviceScale was introduced to GJS in version 1.69.2
-            if (scale != 1.0 && surf.setDeviceScale !== undefined) {
-                surf.setDeviceScale(scale, scale);
-            }
-            let cr = new Cairo.Context(surf);
-            this.container.draw(cr);
-            let itemnumber = this._desktopManager.getNumberOfSelectedItems();
-            if (itemnumber > 1) {
-                Gdk.cairo_set_source_rgba(cr, new Gdk.RGBA({
-                    red: this._desktopManager.selectColor.red,
-                    green: this._desktopManager.selectColor.green,
-                    blue: this._desktopManager.selectColor.blue,
-                    alpha: 0.6,
-                })
-                );
-                itemnumber -= 1;
-                switch (itemnumber.toString().length) {
-                case 1:
-                    cr.rectangle(1, 1, 30, 20);
-                    break;
-                case 2:
-                    cr.rectangle(1, 1, 40, 20);
-                    break;
-                default:
-                    cr.rectangle(1, 1, 50, 20);
-                    break;
-                }
-                cr.fill();
-                cr.setFontSize(18);
-                Gdk.cairo_set_source_rgba(cr, new Gdk.RGBA({red: 1.0, green: 1.0, blue: 1.0, alpha: 1}));
-                cr.moveTo(1, 17);
-                cr.showText(`+${itemnumber}`);
-            }
-            Gtk.drag_set_icon_surface(context, surf);
-            let [x, y] = this._calculateOffset(widget);
-            context.set_hotspot(x, y);
-            this._desktopManager.onDragBegin(this);
-            cr.$dispose();
-        });
-        this.connectSignal(widget, 'drag-data-get', (w, context, data, info, time) => {
-            let dragData = this._desktopManager.fillDragDataGet(info);
-            if (dragData != null) {
-                let list = ByteArray.fromString(dragData[1]);
-                data.set(dragData[0], 8, list);
-            }
-        });
-        this.connectSignal(widget, 'drag-end', (w, context) => {
-            this._desktopManager.onDragEnd();
-        });
+    // eslint-disable-next-line no-unused-vars
+    receiveDrop(x, y, selection, info) {
     }
 
-    _calculateOffset(widget) {
-        if (widget == this._eventBox) {
-            return [((this.width - this.iconwidth) / 2) + this._buttonPressInitialX, this._buttonPressInitialY];
-        } else {
-            return [((this.width - this.labelwidth) / 2) + this._buttonPressInitialX, (this.iconheight + 2) + this._buttonPressInitialY];
-        }
-    }
-
-    _setDropDestination(dropDestination) {
-
+    _dropCapable() {
+        return false;
     }
 
     /** *********************
      * Icon Rendering *
      ***********************/
 
-    updateIcon() {
-        return this._updateIcon();
+    async updateIcon() {
+        await this._updateIcon().catch(e => {
+            if (!e.matches(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED)) {
+                console.error(e, `Exception while updating ${this._getVisibleName
+                    ? this._getVisibleName() : 'an icon'}: ${e.message}`);
+            }
+        });
     }
 
-    async _updateIcon() {
-        if (this._destroyed) {
-            return;
+    async _updateIcon(cancellable) {
+        if ((cancellable && cancellable.is_cancelled()) || this._destroyed) {
+            throw new GLib.Error(Gio.IOErrorEnum,
+                Gio.IOErrorEnum.CANCELLED,
+                'Operation was cancelled');
+        } else if (!cancellable) {
+            cancellable = new Gio.Cancellable();
         }
 
-        this._icon.set_padding(0, 0);
+        if (this._updateIconCancellable)
+            this._updateIconCancellable.cancel();
+
+        this._updateIconCancellable = cancellable;
+
+        if (this.Prefs.darkText) {
+            this._label.remove_css_class('file-label');
+            this._label.add_css_class('file-label-dark');
+        } else {
+            this._label.remove_css_class('file-label-dark');
+            this._label.add_css_class('file-label');
+        }
+
         try {
-            let customIcon = this._fileInfo.get_attribute_as_string('metadata::custom-icon');
-            if (customIcon && (customIcon != '')) {
-                let customIconFile = Gio.File.new_for_uri(customIcon);
-                if (customIconFile.query_exists(null)) {
-                    let loadedImage = await this._loadImageAsIcon(customIconFile);
-                    if (loadedImage | this._destroyed) {
+            const customIcon =
+                this._fileInfo.get_attribute_as_string('metadata::custom-icon');
+
+            if (customIcon && (customIcon !== '')) {
+                const customIconFile = Gio.File.new_for_uri(customIcon);
+
+                if (await this._loadImageAsIcon(customIconFile, cancellable))
+                    return;
+            }
+
+            if (this.thumbnailFile && (this.thumbnailFile !== '')) {
+                const customIconFile = Gio.File.new_for_path(this.thumbnailFile);
+
+                if (await this.FileUtils.queryExists(customIconFile)) {
+                    const loadedImage =
+                        await this._loadImageAsIcon(customIconFile, cancellable);
+
+                    if (loadedImage | this._destroyed)
                         return;
-                    }
                 }
             }
         } catch (error) {
-            print(`Error while updating icon: ${error.message}.\n${error.stack}`);
+            if (error.matches(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
+                throw error;
+
+            console.error(error, `Error while updating icon: ${error.message}`);
         }
 
-        if (this._fileExtra == Enums.FileType.USER_DIRECTORY_TRASH) {
-            let pixbuf = this._createEmblemedIcon(this._fileInfo.get_icon(), null);
-            const scale = this._icon.get_scale_factor();
-            let surface = Gdk.cairo_surface_create_from_pixbuf(pixbuf, scale, null);
-            this._icon.set_from_surface(surface);
+        if (this._fileTypeEnum === this.Enums.FileType.USER_DIRECTORY_TRASH) {
+            let pixbuf =
+                this._createEmblemedIcon(this._fileInfo.get_icon(), null);
+
+            if (cancellable.is_cancelled())
+                return;
+
+            this._icon.set_paintable(pixbuf);
             return;
         }
+
         let iconSet = false;
-        if (Prefs.nautilusSettings.get_string('show-image-thumbnails') != 'never') {
-            let thumbnail = this._desktopManager.thumbnailLoader.getThumbnail(this, this._updateIcon.bind(this));
-            if (thumbnail != null) {
-                let thumbnailFile = Gio.File.new_for_path(thumbnail);
-                iconSet = await this._loadImageAsIcon(thumbnailFile);
-                if (this._destroyed) {
-                    return;
+
+        if (this.Prefs.showImageThumbnails) {
+            try {
+                const thumbnail =
+                    await this.ThumbnailLoader.getThumbnail(
+                        this,
+                        cancellable
+                    );
+
+                if (thumbnail !== null) {
+                    const thumbnailFile = Gio.File.new_for_path(thumbnail);
+                    iconSet =
+                        await this._loadImageAsIcon(thumbnailFile, cancellable);
                 }
+            } catch (e) {
+                if (e.matches(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
+                    throw e;
+
+                console.error(
+                    e, `Error while generating thumbnail: ${e.message}`
+                );
             }
         }
 
         if (!iconSet) {
-            let pixbuf;
+            let iconPaintable;
+
             if (this._isBrokenSymlink) {
-                pixbuf = this._createEmblemedIcon(null, 'text-x-generic');
+                iconPaintable =
+                    this._createEmblemedIcon(null, 'text-x-generic');
             } else if (this._desktopFile && this._desktopFile.has_key('Icon')) {
-                pixbuf = this._createEmblemedIcon(null, this._desktopFile.get_string('Icon'));
+                iconPaintable =
+                    this._createEmblemedIcon(
+                        null,
+                        this._desktopFile.get_string('Icon')
+                    );
             } else {
-                pixbuf = this._createEmblemedIcon(this._getDefaultIcon(), null);
+                iconPaintable =
+                    this._createEmblemedIcon(this._getDefaultIcon(), null);
             }
-            const scale = this._icon.get_scale_factor();
-            let surface = Gdk.cairo_surface_create_from_pixbuf(pixbuf, scale, null);
-            this._icon.set_from_surface(surface);
+
+            if (cancellable.is_cancelled())
+                return;
+
+            this._icon.set_paintable(iconPaintable);
         }
+
+        if (cancellable === this._updateIconCancellable)
+            this._updateIconCancellable = null;
     }
 
     _getDefaultIcon() {
-        if (this._fileExtra == Enums.FileType.EXTERNAL_DRIVE) {
-            return this._custom.get_icon();
-        }
         return this._fileInfo.get_icon();
     }
 
-    _loadImageAsIcon(imageFile) {
-        if (this._loadThumbnailDataCancellable) {
-            this._loadThumbnailDataCancellable.cancel();
-        }
-        this._loadThumbnailDataCancellable = new Gio.Cancellable();
+    async _loadImageAsIcon(imageFile, cancellable) {
+        try {
+            const [thumbnailData] =
+                await imageFile.load_bytes_async(cancellable);
+            const iconTexture =
+                Gdk.Texture.new_from_bytes(thumbnailData);
 
-        return new Promise((resolve, reject) => {
-            imageFile.load_bytes_async(this._loadThumbnailDataCancellable, (source, result) => {
-                this._loadThumbnailDataCancellable = null;
-                try {
-                    let [thumbnailData, etagOut] = source.load_bytes_finish(result);
-                    let thumbnailStream = Gio.MemoryInputStream.new_from_bytes(thumbnailData);
-                    let thumbnailPixbuf = GdkPixbuf.Pixbuf.new_from_stream(thumbnailStream, null);
+            let width = this.Prefs.DesiredWidth;
+            let height = this.Prefs.IconSize;
 
-                    if (thumbnailPixbuf != null) {
-                        let width = Prefs.get_desired_width() - 8;
-                        let height = Prefs.get_icon_size() - 8;
-                        let aspectRatio = thumbnailPixbuf.width / thumbnailPixbuf.height;
-                        if ((width / height) > aspectRatio) {
-                            width = height * aspectRatio;
-                        } else {
-                            height = width / aspectRatio;
-                        }
-                        const scale = this._icon.get_scale_factor();
-                        width *= scale;
-                        height *= scale;
-                        let pixbuf = thumbnailPixbuf.scale_simple(Math.floor(width), Math.floor(height), GdkPixbuf.InterpType.BILINEAR);
-                        pixbuf = this._addEmblemsToPixbufIfNeeded(pixbuf);
-                        let surface = Gdk.cairo_surface_create_from_pixbuf(pixbuf, scale, null);
-                        this._icon.set_from_surface(surface);
-                        this._icon.set_padding(4, 4);
-                        resolve(true);
-                    }
-                    resolve(false);
-                } catch (e) {
-                    resolve(false);
-                }
-            });
-        });
-    }
+            const aspectRatio = iconTexture.width / iconTexture.height;
 
-    _copyAndResizeIfNeeded(pixbuf) {
-        /**
-         * If the pixbuf is the original from the theme, copies it into a new one, to be able
-         * to paint the emblems without altering the cached pixbuf in the theme object.
-         * Also, ensures that the copied pixbuf is, at least, as big as the desired icon size,
-         * to ensure that the emblems fit.
-         */
+            if ((width / height) > aspectRatio)
+                width = height * aspectRatio;
+            else
+                height = width / aspectRatio;
 
-        if (this._copiedPixbuf) {
-            return pixbuf;
-        }
+            const iconPaintableSnapshot = Gtk.Snapshot.new();
+            iconTexture.snapshot(
+                iconPaintableSnapshot,
+                Math.floor(width),
+                Math.floor(height)
+            );
 
-        this._copiedPixbuf = true;
-        let minsize = Prefs.get_icon_size();
-        if ((pixbuf.width < minsize) || (pixbuf.height < minsize)) {
-            let width = pixbuf.width < minsize ? minsize : pixbuf.width;
-            let height = pixbuf.height < minsize ? minsize : pixbuf.height;
-            let newpixbuf = GdkPixbuf.Pixbuf.new(pixbuf.colorspace, true, pixbuf.bits_per_sample, width, height);
-            newpixbuf.fill(0);
-            let x = Math.floor((width - pixbuf.width) / 2);
-            let y = Math.floor((height - pixbuf.height) / 2);
-            pixbuf.composite(newpixbuf, x, y, pixbuf.width, pixbuf.height, x, y, 1, 1,  GdkPixbuf.InterpType.NEAREST, 255);
-            return newpixbuf;
-        } else {
-            return pixbuf.copy();
+            let icon = iconPaintableSnapshot.to_paintable(null);
+            icon = this._addEmblemsToIconIfNeeded(icon);
+
+            this._icon.set_paintable(icon);
+
+            return true;
+        } catch (e) {
+            if (e.matches(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
+                throw e;
+
+            console
+            .error(e, `Error while loading ${imageFile.get_uri()} as icon`);
+
+            return false;
         }
     }
 
-    _addEmblemsToPixbufIfNeeded(pixbuf) {
+    _addEmblem(iconPaintable, emblem = null, position = 0) {
+        if (!emblem)
+            return iconPaintable;
+
         const scale = this._icon.get_scale_factor();
-        this._copiedPixbuf = false;
-        let emblem = null;
-        let finalSize = Math.floor(Prefs.get_icon_size() / 3) * scale;
 
-        if (this._isDesktopFile && (!this._isValidDesktopFile || !this.trustedDesktopFile)) {
-            pixbuf = this._copyAndResizeIfNeeded(pixbuf);
-            pixbuf.saturate_and_pixelate(pixbuf, 0.5, true);
-            emblem = Gio.ThemedIcon.new('emblem-unreadable');
-            pixbuf = this._copyAndResizeIfNeeded(pixbuf);
-            let theme = Gtk.IconTheme.get_default();
-            let emblemIcon = theme.lookup_by_gicon_for_scale(emblem, finalSize / scale, scale, Gtk.IconLookupFlags.FORCE_SIZE).load_icon();
-            emblemIcon.composite(pixbuf, pixbuf.width - finalSize, pixbuf.height - finalSize, finalSize, finalSize, pixbuf.width - finalSize, pixbuf.height - finalSize, 1, 1, GdkPixbuf.InterpType.BILINEAR, 255);
+        let ratio;
+        switch (this.Prefs.IconSize) {
+        case 36: ratio = 3;
+            break;
+        case 48: ratio = 3;
+            break;
+        case 64: ratio = 4;
+            break;
+        case 96: ratio = 5;
         }
 
-        if (this._isSymlink && (this._desktopManager.showLinkEmblem || this._isBrokenSymlink)) {
-            if (this._isBrokenSymlink) {
-                emblem = Gio.ThemedIcon.new('emblem-unreadable');
-            } else {
-                emblem = Gio.ThemedIcon.new('emblem-symbolic-link');
-            }
-            pixbuf = this._copyAndResizeIfNeeded(pixbuf);
-            let theme = Gtk.IconTheme.get_default();
-            let emblemIcon = theme.lookup_by_gicon_for_scale(emblem, finalSize / scale, scale, Gtk.IconLookupFlags.FORCE_SIZE).load_icon();
-            emblemIcon.composite(pixbuf, pixbuf.width - finalSize, pixbuf.height - finalSize, finalSize, finalSize, pixbuf.width - finalSize, pixbuf.height - finalSize, 1, 1, GdkPixbuf.InterpType.BILINEAR, 255);
+        const finalSize = Math.floor(this.Prefs.IconSize / ratio) * scale;
+        const iconWidth =  iconPaintable.get_intrinsic_width();
+        const iconHeight = iconPaintable.get_intrinsic_height();
+
+        const theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default());
+
+        const emblemIcon =
+            theme.lookup_by_gicon(
+                emblem,
+                finalSize / scale,
+                scale,
+                Gtk.TextDirection.NONE,
+                Gtk.IconLookupFlags.FORCE_SIZE
+            );
+
+        const emblemWidth = emblemIcon.get_intrinsic_width();
+        const emblemHeight = emblemIcon.get_intrinsic_height();
+
+        const emblemSnapshot = Gtk.Snapshot.new();
+
+        const origin = new Graphene.Point({x: 3, y: 3});
+        const size = new Graphene.Size(
+            {width: emblemWidth - 5, height: emblemHeight - 5}
+        );
+        const rect = new Graphene.Rect({origin, size});
+        const color = new Gdk.RGBA();
+        color.parse('rgba(255, 255, 255, 1.0)');
+        emblemSnapshot.append_color(
+            color,
+            rect
+        );
+        emblemIcon.snapshot(emblemSnapshot, emblemWidth, emblemHeight);
+
+        const iconPaintableSnapshot = Gtk.Snapshot.new();
+        iconPaintable.snapshot(iconPaintableSnapshot, iconWidth, iconHeight);
+
+        if (position === 0) {
+            const desiredWidth = this.Prefs.DesiredWidth - 8;
+            const estimatedWidth = iconWidth + 2 * emblemWidth;
+            const finalWidth = Math.min(desiredWidth, estimatedWidth);
+
+            const newIconPaintableSnapshot = Gtk.Snapshot.new();
+            const xorigin = new Graphene.Point({x: 0, y: 0});
+
+            const xsize = new Graphene.Size(
+                {width: finalWidth, height: iconHeight}
+            );
+
+            const xrect = new Graphene.Rect({origin: xorigin, size: xsize});
+            const xcolor = new Gdk.RGBA();
+            xcolor.parse('rgba(0, 0, 0, 0)');
+
+            newIconPaintableSnapshot.append_color(
+                xcolor,
+                xrect
+            );
+
+            newIconPaintableSnapshot.translate(
+                new Graphene.Point({
+                    x: Math.round((finalWidth - iconWidth) / 2),
+                    y: 0,
+                })
+            );
+
+            newIconPaintableSnapshot
+            .append_node(iconPaintableSnapshot.to_node());
+
+            const emblemX =
+                Math.round((iconWidth + finalWidth) / 2 - emblemWidth);
+
+            newIconPaintableSnapshot
+            .translate(
+                new Graphene.Point(
+                    {
+                        x: emblemX,
+                        y: emblemHeight * position + Number(position) * 1,
+                    }
+                )
+            );
+
+            newIconPaintableSnapshot.append_node(emblemSnapshot.to_node());
+
+            return newIconPaintableSnapshot.to_paintable(null);
         }
 
-        if (this.isStackTop && !this.stackUnique) {
-            pixbuf = this._copyAndResizeIfNeeded(pixbuf);
-            let theme = Gtk.IconTheme.get_default();
-            emblem = Gio.ThemedIcon.new('emblem-downloads');
-            let emblemIcon = theme.lookup_by_gicon_for_scale(emblem, finalSize / scale, scale, Gtk.IconLookupFlags.FORCE_SIZE).load_icon();
-            emblemIcon.composite(pixbuf, 0, 0, finalSize, finalSize, 0, 0, 1, 1, GdkPixbuf.InterpType.BILINEAR, 255);
-        }
-        return pixbuf;
+        iconPaintableSnapshot.translate(new Graphene.Point({
+            x: iconWidth - emblemWidth,
+            y: emblemHeight * position + Number(position) * 1,
+        }));
+        iconPaintableSnapshot.append_node(emblemSnapshot.to_node());
+        return iconPaintableSnapshot.to_paintable(null);
+    }
+
+    _addEmblemsToIconIfNeeded(iconPaintable) {
+        return this._addEmblem(iconPaintable);
     }
 
     _createEmblemedIcon(icon, iconName) {
-        if (icon == null) {
+        if (icon === null) {
             if (GLib.path_is_absolute(iconName)) {
                 try {
                     let iconFile = Gio.File.new_for_commandline_arg(iconName);
@@ -752,67 +915,131 @@ var desktopIconItem = class desktopIconItem extends SignalManager.SignalManager 
                     icon = Gio.ThemedIcon.new_with_default_fallbacks(iconName);
                 }
             } else {
-                icon = Gio.ThemedIcon.new_with_default_fallbacks(iconName);
+                try {
+                    icon = Gio.Icon.new_for_string(iconName);
+                } catch (e) {
+                    icon = Gio.ThemedIcon.new_with_default_fallbacks(iconName);
+                }
             }
         }
-        let theme = Gtk.IconTheme.get_default();
+
+        let theme =
+            Gtk.IconTheme.get_for_display(Gdk.Display.get_default());
 
         const scale = this._icon.get_scale_factor();
-        let itemIcon = null;
+        let iconPaintable = null;
+
         try {
-            itemIcon = theme.lookup_by_gicon_for_scale(icon, Prefs.get_icon_size(), scale, Gtk.IconLookupFlags.FORCE_SIZE).load_icon();
+            iconPaintable =
+                theme.lookup_by_gicon(
+                    icon,
+                    this.Prefs.IconSize,
+                    scale,
+                    Gtk.TextDirection.NONE,
+                    Gtk.IconLookupFlags.FORCE_SIZE
+                );
         } catch (e) {
-            itemIcon = theme.load_icon_for_scale('text-x-generic', Prefs.get_icon_size(), scale, Gtk.IconLookupFlags.FORCE_SIZE);
+            iconPaintable =
+                theme.lookup_icon(
+                    'text-x-generic',
+                    [],
+                    this.Prefs.IconSize,
+                    scale,
+                    Gtk.TextDirection.NONE,
+                    Gtk.IconLookupFlags.FORCE_SIZE
+                );
         }
 
-        itemIcon = this._addEmblemsToPixbufIfNeeded(itemIcon);
-
-        return itemIcon;
+        return this._addEmblemsToIconIfNeeded(iconPaintable);
     }
 
     /** *********************
      * Getters and setters *
      ***********************/
 
+    get _desktopDir() {
+        return this._desktopManager.desktopDir;
+    }
+
     get state() {
         return this._state;
     }
 
     set state(state) {
-        if (state == this._state) {
+        if (state === this._state)
             return;
-        }
 
         this._state = state;
     }
 
+    get dropCapable() {
+        return this._dropCapable();
+    }
+
     get isDrive() {
-        return this._fileExtra == Enums.FileType.EXTERNAL_DRIVE;
+        return this._fileTypeEnum === this.Enums.FileType.EXTERNAL_DRIVE;
     }
 
     get isSelected() {
         return this._isSelected;
     }
 
-    get isKeyboardSelected() {
-        return this._isKeyboardSelected;
-    }
-
-    set isKeyboardSelected(status) {
-        this._isKeyboardSelected = status;
-        this._setSelectedStatus();
-    }
-
     get isSpecial() {
         return this._isSpecial;
+    }
+
+    get savedCoordinates() {
+        return this._savedCoordinates;
+    }
+
+    get normalCoordinates() {
+        return this._normalCoordinates;
+    }
+
+    get monitorIndex() {
+        return this._monitorIndex;
     }
 
     get dropCoordinates() {
         return this._dropCoordinates;
     }
 
+    get isEncrypted() {
+        if (this._isEncrypted === undefined)
+            return false;
+        return this._isEncrypted;
+    }
+
+    get column() {
+        return this._column;
+    }
+
+    get row() {
+        return this._row;
+    }
+
+    set column(num) {
+        this._column = num;
+    }
+
+    set row(num) {
+        this._row = num;
+    }
+
     set dropCoordinates(pos) {
-        this._dropCoordinates = pos;
+        this.writeDropCoordinates(pos);
+    }
+
+    set savedCoordinates(pos) {
+        this.writeSavedCoordinates(pos);
+    }
+
+    set temporarySavedPosition(pos) {
+        this._savedCoordinates = pos;
+    }
+
+    set temporaryMonitorIndex(index) {
+        this._monitorIndex = index;
     }
 };
-Signals.addSignalMethods(desktopIconItem.prototype);
+Signals.addSignalMethods(DesktopIconItem.prototype);
