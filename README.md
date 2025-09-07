@@ -48,16 +48,21 @@ Absolutely. Using ArchISO tool, you should be able to get the newest build of Li
 
 <h2>Does it support [...] language?</h2>
 There are couple of fully supported languages:
-* English
-* French
-* German
-* Hindi
-* Polish
-* Portuguese (BR)
-* Russian
-* Spanish
-* Chinese
-Other languages are not yet fully supported by Linexin apps.
+<br><ul>
+  <li>English</li>
+  <li>French</li>
+  <li>German</li>
+  <li>Hindi</li>
+  <li>Polish</li>
+  <li>Portuguese (BR)</li>
+  <li>Russian</li>
+  <li>Spanish</li>
+  <li>Chinese</li>
+</ul><br> 
+
+Other languages are not yet fully supported by Linexin apps. <br>
+
+
 
 <br><br><br>
 This is a fork of [ArchISO](https://github.com/archlinux/archiso)
