@@ -126,8 +126,8 @@ wvdial
 xdg-utils
 xfsprogs
 xl2tpd
-zsh
 os-prober
+bash
 
 #
 # Custom Packages
@@ -166,7 +166,7 @@ wine-mono
 winetricks
 linexin-updater
 unzip
-affinity-installer
+affinity-installer2
 fuse
 libappimage
 davinci-installer
