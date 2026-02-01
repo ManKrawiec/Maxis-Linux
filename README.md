@@ -24,13 +24,3 @@ Not recommended for production use yet.
 ## License
 Maxis Linux is an **open-source** project.  
 See the repository for license details.
-
-## TODO / Roadmap
-
-- [ ] Podstawowy interfejs CLI (menu tekstowe)
-- [ ] Wybór dysku i partycjonowanie
-- [ ] Instalacja base system Gentoo
-- [ ] Konfiguracja fstab
-- [ ] Konfiguracja użytkownika i hasła root
-- [ ] Obsługa błędów i walidacja danych
-- [ ] Testy na maszynie wirtualnej
