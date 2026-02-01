@@ -4,6 +4,11 @@
 
 This project is **open-source** and was created for learning, experimentation, and building a custom Linux distribution.
 
+## Download ISO
+
+You can download the latest Maxis Linux ISO here:  
+[Download Maxis Linux ISO](https://zsnr2wolomin-my.sharepoint.com/:f:/g/personal/krawczyk_maksymilian_sp2wolomin_edu_pl/IgDfJZ-44FsaR7SlBnNUHN46AeCmd9WlizzUD9rJ4MLa9PA?e=HWw1Rw)
+
 ## Features
 - 🧱 Based on Arch Linux  
 - 🔧 Modified Linexin fork  
