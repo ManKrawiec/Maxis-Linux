@@ -1,0 +1,7 @@
+#!/bin/bash
+
+sudo cp -rf /usr/share/linexin/wireplumber/ /etc/
+sudo amixer set 'Master' 100%
+sudo alsactl store
+echo "Reboot may be required to apply the fix"
+return 0
