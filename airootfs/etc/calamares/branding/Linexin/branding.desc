@@ -1,0 +1,44 @@
+---
+componentName:  Linexin
+
+welcomeStyleCalamares:   false
+
+welcomeExpandingLogo:   true
+
+windowExpanding:    noexpand
+
+windowSize: 1150px,700px
+
+windowPlacement: center
+
+sidebar: widget
+
+navigation: widget
+
+strings:
+    productName:         Maxis Linux
+    shortProductName:    Maxis Linux
+    version:             0.1
+    shortVersion:        2025.07.18
+    versionedName:       Maxis Linux
+    shortVersionedName:  Maxis Linux
+    bootloaderEntryName: Maxis Linux
+
+images:
+    productIcon:            "logo.png"
+    productLogo:            "squid.png"
+    productWelcome:         "idioma.png"
+
+style:
+   SidebarBackground:        "#000000"
+   SidebarText:              "#FFFFFF"
+   SidebarTextCurrent:       "#FFFFFF"
+   SidebarBackgroundCurrent: "#9553a0"
+
+slideshow:               "show.qml"
+
+slideshowAPI: 2
+
+uploadServer :
+    type :    "fiche"
+    url :     "http://termbin.com:9999"
