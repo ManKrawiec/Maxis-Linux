@@ -1,6 +1,6 @@
-NAME="Linexin"
-PRETTY_NAME="Linexin"
-ID=linexin
+NAME="Maxis Linux"
+PRETTY_NAME="Maxis Linux"
+ID=maxislinux
 ID_LIKE=arch
 BUILD_ID=rolling
 VERSION_ID="2.0"

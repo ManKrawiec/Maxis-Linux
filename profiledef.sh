@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2034
 
-iso_name="linexin"
-iso_label="LINEXIN_$(date --date="@${SOURCE_DATE_EPOCH:-$(date +%s)}" +%Y%m)"
-iso_publisher="Linexin <https://github.com/Petexy/Linexin>"
-iso_application="Linexin LiveISO / Installer"
+iso_name="maxislinux"
+iso_label="MAXISLINUX_$(date --date="@${SOURCE_DATE_EPOCH:-$(date +%s)}" +%Y%m)"
+iso_publisher="Maxis Linux <https://github.com/Petexy/Linexin>"
+iso_application="Maxis Linux LiveISO / Installer"
 iso_version="$(date --date="@${SOURCE_DATE_EPOCH:-$(date +%s)}" +%Y.%m.%d)"
 install_dir="arch"
 buildmodes=('iso')

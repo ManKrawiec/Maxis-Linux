@@ -16,13 +16,13 @@ sidebar: widget
 navigation: widget
 
 strings:
-    productName:         Linexin
-    shortProductName:    Linexin
+    productName:         Maxis Linux
+    shortProductName:    Maxis Linux
     version:             0.1
     shortVersion:        2025.07.18
-    versionedName:       Linexin
-    shortVersionedName:  Linexin
-    bootloaderEntryName: Linexin
+    versionedName:       Maxis Linux
+    shortVersionedName:  Maxis Linux
+    bootloaderEntryName: Maxis Linux
 
 images:
     productIcon:            "logo.png"
