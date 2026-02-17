@@ -3,7 +3,7 @@
 
 iso_name="maxislinux"
 iso_label="MAXISLINUX_$(date --date="@${SOURCE_DATE_EPOCH:-$(date +%s)}" +%Y%m)"
-iso_publisher="Maxis Linux <https://github.com/Petexy/Linexin>"
+iso_publisher="Maxis Linux <https://github.com/ManKrawiec/Maxis-Linux>"
 iso_application="Maxis Linux LiveISO / Installer"
 iso_version="$(date --date="@${SOURCE_DATE_EPOCH:-$(date +%s)}" +%Y.%m.%d)"
 install_dir="arch"

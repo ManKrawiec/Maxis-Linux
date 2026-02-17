@@ -1,6 +1,6 @@
 # Maxis Linux
 
-**Maxis Linux** is my first custom Linux distribution based on **Arch Linux**, modified from the **Linexin** distribution.
+**Maxis Linux** is my first custom Linux distribution based on **Arch Linux**.
 
 This project is **open-source** and was created for learning, experimentation, and building a custom Linux distribution.
 
@@ -11,7 +11,6 @@ You can download the latest Maxis Linux ISO here:
 
 ## Features
 - 🧱 Based on Arch Linux  
-- 🔧 Modified Linexin fork  
 - 📦 Access to Arch repositories (pacman, AUR)  
 - 🆓 Open Source  
 - 🧪 Hobby / educational project  

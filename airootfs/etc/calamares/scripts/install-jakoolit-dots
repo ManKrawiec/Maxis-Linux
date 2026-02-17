@@ -1,0 +1,40 @@
+#!/bin/bash
+# Script to install JaKooLit Hyprland Dotfiles
+# This script is run as the target user after Hyprland installation
+
+set -e
+
+USER_HOME="$1"
+USERNAME="$2"
+
+if [ -z "$USER_HOME" ] || [ -z "$USERNAME" ]; then
+    echo "Usage: $0 <user_home> <username>"
+    exit 1
+fi
+
+# Check if Hyprland is installed
+if ! pacman -Qi hyprland &>/dev/null; then
+    echo "Hyprland not installed, skipping dotfiles installation"
+    exit 0
+fi
+
+echo "Installing JaKooLit Hyprland Dotfiles for $USERNAME..."
+
+# Clone the dotfiles repository
+cd "$USER_HOME"
+if [ -d "Hyprland-Dots" ]; then
+    rm -rf Hyprland-Dots
+fi
+
+su - "$USERNAME" -c "git clone --depth=1 https://github.com/JaKooLit/Hyprland-Dots.git"
+
+# Run the copy script to apply dotfiles
+cd "$USER_HOME/Hyprland-Dots"
+if [ -f "copy.sh" ]; then
+    su - "$USERNAME" -c "cd ~/Hyprland-Dots && chmod +x copy.sh && ./copy.sh"
+fi
+
+# Cleanup
+rm -rf "$USER_HOME/Hyprland-Dots"
+
+echo "JaKooLit Hyprland Dotfiles installed successfully!"

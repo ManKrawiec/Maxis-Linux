@@ -1,0 +1,76 @@
+- name: "Desktop Environment"
+  description: "Select your preferred desktop environment"
+  critical: true
+  immutable: false
+  selected: false
+  subgroups:
+    - name: "GNOME"
+      description: "GNOME Desktop Environment - Modern and user-friendly"
+      critical: false
+      selected: true
+      packages:
+        - gnome
+        - gnome-tweaks
+        - extension-manager
+        - gdm
+      post-install: |
+        systemctl enable gdm
+
+    - name: "KDE Plasma"
+      description: "KDE Plasma Desktop - Feature-rich and customizable"
+      critical: false
+      selected: false
+      packages:
+        - plasma-meta
+        - kde-applications-meta
+        - sddm
+        - packagekit-qt6
+      post-install: |
+        systemctl enable sddm
+
+    - name: "Hyprland"
+      description: "Hyprland - Dynamic tiling Wayland compositor (JaKooLit config)"
+      critical: false
+      selected: false
+      packages:
+        - hyprland
+        - waybar
+        - wofi
+        - kitty
+        - sddm
+        - xdg-desktop-portal-hyprland
+        - polkit-kde-agent
+        - qt5-wayland
+        - qt6-wayland
+        - dunst
+        - swww
+        - swaylock
+        - wlogout
+        - grim
+        - slurp
+        - pamixer
+        - brightnessctl
+        - bluez
+        - bluez-utils
+        - blueman
+        - network-manager-applet
+        - thunar
+        - thunar-archive-plugin
+        - file-roller
+        - pavucontrol
+        - cliphist
+        - wl-clipboard
+        - nwg-look
+        - qt5ct
+        - kvantum
+        - ttf-jetbrains-mono-nerd
+        - ttf-font-awesome
+        - papirus-icon-theme
+        - python-pywal
+        - imagemagick
+        - jq
+        - curl
+        - rsync
+      post-install: |
+        systemctl enable sddm
+        systemctl enable bluetooth
