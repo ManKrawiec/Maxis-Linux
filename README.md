@@ -27,23 +27,10 @@ boot configuration, and installer assets used to build the ISO image.
 - `efiboot/`, `grub/`, `syslinux/`: bootloader configs
 - `local/repo/`: local package repository used during build
 
-## Build ISO (ArchISO)
-
-1. Install required tools:
-   ```bash
-   sudo pacman -S archiso
-   ```
-2. Build from repository root:
-   ```bash
-   cd Linexin
-   sudo mkarchiso -v .
-   ```
-3. Output ISO appears in `out/`.
-
 ## Download
 
-There is currently no official public ISO mirror.
-Please build the ISO yourself from this repository using the steps above.
+Latest published ISO:
+[Download Maxis Linux ISO](https://zsnr2wolomin-my.sharepoint.com/:f:/g/personal/krawczyk_maksymilian_sp2wolomin_edu_pl/IgDfJZ-44FsaR7SlBnNUHN46AeCmd9WlizzUD9rJ4MLa9PA?e=HWw1Rw)
 
 ## Status
 
