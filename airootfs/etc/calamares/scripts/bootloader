@@ -5,7 +5,7 @@ mkinitcpio -P
 
 # Create loader configuration
 cat > /boot/loader/loader.conf <<EOF
-default  linexin.conf
+default  maxis.conf
 timeout  0
 console-mode max
 editor   no
@@ -13,8 +13,8 @@ EOF
 
 # Create boot entry
 ROOT_UUID=$(findmnt -no UUID /)
-cat > /boot/loader/entries/linexin.conf <<EOF
-title    linexin
+cat > /boot/loader/entries/maxis.conf <<EOF
+title    Maxis Linux
 linux    /vmlinuz-linux
 initrd   /initramfs-linux.img
 options  quiet splash root=UUID=$ROOT_UUID rw

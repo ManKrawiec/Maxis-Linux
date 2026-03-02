@@ -1,40 +1,55 @@
 #!/bin/bash
 # Script to install JaKooLit Hyprland Dotfiles
-# This script is run as the target user after Hyprland installation
+# This script runs from the LIVE system (dontChroot context)
+# and installs dotfiles to the TARGET system
 
-set -e
-
-USER_HOME="$1"
+ROOT_MOUNT="$1"
 USERNAME="$2"
 
-if [ -z "$USER_HOME" ] || [ -z "$USERNAME" ]; then
-    echo "Usage: $0 <user_home> <username>"
+if [ -z "$ROOT_MOUNT" ] || [ -z "$USERNAME" ]; then
+    echo "Usage: $0 <root_mount> <username>"
     exit 1
 fi
 
-# Check if Hyprland is installed
-if ! pacman -Qi hyprland &>/dev/null; then
+USER_HOME="${ROOT_MOUNT}/home/${USERNAME}"
+
+# Check if Hyprland is installed in target system
+if ! arch-chroot "$ROOT_MOUNT" pacman -Qi hyprland &>/dev/null; then
     echo "Hyprland not installed, skipping dotfiles installation"
     exit 0
 fi
 
 echo "Installing JaKooLit Hyprland Dotfiles for $USERNAME..."
 
-# Clone the dotfiles repository
-cd "$USER_HOME"
-if [ -d "Hyprland-Dots" ]; then
-    rm -rf Hyprland-Dots
+# Clone the dotfiles repository to target system
+if [ -d "${USER_HOME}/Hyprland-Dots" ]; then
+    rm -rf "${USER_HOME}/Hyprland-Dots"
 fi
 
-su - "$USERNAME" -c "git clone --depth=1 https://github.com/JaKooLit/Hyprland-Dots.git"
+git clone --depth=1 https://github.com/JaKooLit/Hyprland-Dots.git "${USER_HOME}/Hyprland-Dots"
 
-# Run the copy script to apply dotfiles
-cd "$USER_HOME/Hyprland-Dots"
-if [ -f "copy.sh" ]; then
-    su - "$USERNAME" -c "cd ~/Hyprland-Dots && chmod +x copy.sh && ./copy.sh"
+# Fix ownership
+arch-chroot "$ROOT_MOUNT" chown -R "${USERNAME}:${USERNAME}" "/home/${USERNAME}/Hyprland-Dots"
+
+# Run the copy script in chroot as the user
+arch-chroot "$ROOT_MOUNT" su - "$USERNAME" -c "cd ~/Hyprland-Dots && chmod +x copy.sh && ./copy.sh --no-confirm 2>/dev/null || ./copy.sh 2>/dev/null || true"
+
+# If copy.sh doesn't work, manually copy config files
+if [ -d "${USER_HOME}/Hyprland-Dots/config" ]; then
+    echo "Manually copying config files..."
+    mkdir -p "${USER_HOME}/.config"
+    cp -r "${USER_HOME}/Hyprland-Dots/config/"* "${USER_HOME}/.config/" 2>/dev/null || true
+    arch-chroot "$ROOT_MOUNT" chown -R "${USERNAME}:${USERNAME}" "/home/${USERNAME}/.config"
+fi
+
+# Copy wallpapers if available
+if [ -d "${USER_HOME}/Hyprland-Dots/assets/wallpapers" ]; then
+    mkdir -p "${USER_HOME}/Pictures/wallpapers"
+    cp -r "${USER_HOME}/Hyprland-Dots/assets/wallpapers/"* "${USER_HOME}/Pictures/wallpapers/" 2>/dev/null || true
+    arch-chroot "$ROOT_MOUNT" chown -R "${USERNAME}:${USERNAME}" "/home/${USERNAME}/Pictures"
 fi
 
 # Cleanup
-rm -rf "$USER_HOME/Hyprland-Dots"
+rm -rf "${USER_HOME}/Hyprland-Dots"
 
 echo "JaKooLit Hyprland Dotfiles installed successfully!"

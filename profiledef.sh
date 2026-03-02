@@ -25,4 +25,9 @@ file_permissions=(
   ["/usr/local/bin/choose-mirror"]="0:0:755"
   ["/usr/local/bin/Installation_guide"]="0:0:755"
   ["/usr/local/bin/livecd-sound"]="0:0:755"
+  ["/usr/share/maxis-installer/installer"]="0:0:755"
+  ["/usr/share/maxis-installer/bootloader.sh"]="0:0:755"
+  ["/usr/share/maxis-installer/post-install.sh"]="0:0:755"
+  ["/usr/share/maxis-installer/remove_gpu.sh"]="0:0:755"
+  ["/usr/share/maxis-installer/remove_ucode.sh"]="0:0:755"
 )

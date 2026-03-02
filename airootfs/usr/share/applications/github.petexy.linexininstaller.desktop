@@ -7,5 +7,5 @@ Icon=/usr/share/maxis-installer/images/github.petexy.maxisinstaller.svg
 
 Terminal=false
 Type=Application
-Categories=GTK; Installer; System; MaxisLinux; Adwaita
+Categories=GTK; Installer;System;Maxis;Adwaita;
 StartupNotify=false
