@@ -1,26 +1,55 @@
 # Maxis Linux
 
-**Maxis Linux** is my first custom Linux distribution based on **Arch Linux**.
+Maxis Linux is a custom Arch-based Linux distribution focused on a clean live
+environment and a custom installer workflow.
 
-This project is **open-source** and was created for learning, experimentation, and building a custom Linux distribution.
+This repository contains the ArchISO profile, live filesystem customizations,
+boot configuration, and installer assets used to build the ISO image.
 
-## Download ISO
+## Preview
 
-You can download the latest Maxis Linux ISO here:  
+![Maxis Linux preview](./hyperland-just-basic-v0-cw1l6luc9z1b1.webp)
+
+## Highlights
+
+- Arch Linux base with `pacman` ecosystem
+- Custom live environment under `airootfs/`
+- Integrated Maxis installer
+- Calamares modules and post-install scripts
+- Custom branding and boot assets
+
+## Repository layout
+
+- `airootfs/`: files copied into the live system root
+- `packages.x86_64`: packages included in the ISO
+- `profiledef.sh`: ArchISO profile metadata and build settings
+- `pacman.conf`: package manager configuration for ISO build
+- `efiboot/`, `grub/`, `syslinux/`: bootloader configs
+- `local/repo/`: local package repository used during build
+
+## Build ISO (ArchISO)
+
+1. Install required tools:
+   ```bash
+   sudo pacman -S archiso
+   ```
+2. Build from repository root:
+   ```bash
+   cd Linexin
+   sudo mkarchiso -v .
+   ```
+3. Output ISO appears in `out/`.
+
+## Download
+
+Latest published ISO:
 [Download Maxis Linux ISO](https://zsnr2wolomin-my.sharepoint.com/:f:/g/personal/krawczyk_maksymilian_sp2wolomin_edu_pl/IgDfJZ-44FsaR7SlBnNUHN46AeCmd9WlizzUD9rJ4MLa9PA?e=HWw1Rw)
 
-## Features
-- 🧱 Based on Arch Linux  
-- 📦 Access to Arch repositories (pacman, AUR)  
-- 🆓 Open Source  
-- 🧪 Hobby / educational project  
-- 🚀 Independently developed
+## Status
 
-## Project status
-⚠️ This project is in an early development stage and may contain bugs.  
-Not recommended for production use yet.
+The project is under active development and may contain bugs.
 
 ## License
-Maxis Linux is an **open-source** project.  
-See the repository for license details.
 
+This project is open source and licensed under the terms in
+[LICENSE](./LICENSE).
