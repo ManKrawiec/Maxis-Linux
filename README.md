@@ -42,8 +42,8 @@ boot configuration, and installer assets used to build the ISO image.
 
 ## Download
 
-Latest published ISO:
-[Download Maxis Linux ISO](https://zsnr2wolomin-my.sharepoint.com/:f:/g/personal/krawczyk_maksymilian_sp2wolomin_edu_pl/IgDfJZ-44FsaR7SlBnNUHN46AeCmd9WlizzUD9rJ4MLa9PA?e=HWw1Rw)
+There is currently no official public ISO mirror.
+Please build the ISO yourself from this repository using the steps above.
 
 ## Status
 
